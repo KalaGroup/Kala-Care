@@ -927,6 +927,25 @@ class AMCExpiryPlanner(Base):
     updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
 
+class ImportUploadLog(Base):
+    """WHO uploaded WHAT on the Data Upload page — one row per successful import.
+
+    The data tables themselves only carry updated_at, so before this log the
+    page could say WHEN the data last changed but not BY WHOM. /import/last-updated
+    reads the newest row per file_type and prints the uploader next to the
+    'Last data update' line. Failed imports are not logged — they changed nothing."""
+    __tablename__ = "import_upload_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    file_type = Column(String(100), nullable=False, index=True)
+    file_name = Column(String(255), nullable=True)
+    uploaded_by = Column(String(50), nullable=True, index=True)   # users.user_id
+    imported_count = Column(Integer, nullable=False, default=0)
+    updated_count = Column(Integer, nullable=False, default=0)
+    total_processed = Column(Integer, nullable=False, default=0)
+    uploaded_at = Column(DateTime, default=now_ist, index=True)
+
+
 class LMSInsia(Base):
     """'LMS Data from Insia' import - the branch LMS lead export, one row per LEAD NUMBER.
 

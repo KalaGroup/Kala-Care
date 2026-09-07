@@ -181,7 +181,7 @@ const SRAR_COLS = [
   { key: 'site', t: 'Installation Site Address', w: 280, xl: 42 },
 ];
 
-const SEDetailModal = ({ mode, name, uid, branch, branchId, from, to, onClose }) => {
+const SEDetailModal = ({ mode, name, uid, branch, branchId, region, from, to, onClose }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -191,7 +191,12 @@ const SEDetailModal = ({ mode, name, uid, branch, branchId, from, to, onClose })
   const [sort, setSort] = useState({ key: '', dir: 1 });
   const [busy, setBusy] = useState(false);
 
-  const isEP = mode === 'ep';
+  // 'ep-other' is the MH Other / KA Other row: the same Close SR record shape
+  // as one engineer's drill-down, but the rows of a whole REGION done by
+  // engineers who belong to another branch — so it reads like 'ep' throughout
+  // and only the URL differs.
+  const isOther = mode === 'ep-other';
+  const isEP = mode === 'ep' || isOther;
   const canExport = canExportExcel();
 
   // Esc closes, and the page behind must not scroll while the box is open.
@@ -211,10 +216,15 @@ const SEDetailModal = ({ mode, name, uid, branch, branchId, from, to, onClose })
     (async () => {
       setLoading(true); setError('');
       try {
-        const p = new URLSearchParams({ name: name || '', date_from: from || '', date_to: to || '' });
-        if (isEP) p.set('branch_id', branchId || '');
+        const p = new URLSearchParams({ date_from: from || '', date_to: to || '' });
+        if (isOther) {
+          p.set('region', region || '');
+        } else {
+          p.set('name', name || '');
+          if (isEP) p.set('branch_id', branchId || '');
+        }
         const url = `${API}/pms/report/${isEP ? 'employee-productivity' : 'sr-allocation'}`
-          + `/se-records?${p.toString()}`;
+          + `/${isOther ? 'other-records' : 'se-records'}?${p.toString()}`;
         const res = await fetch(url, { headers: authHeaders() });
         const d = await res.json();
         if (!alive) return;

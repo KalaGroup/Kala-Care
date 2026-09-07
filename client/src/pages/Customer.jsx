@@ -326,6 +326,38 @@ const TAB_TABLES = [
   )
 ];
 
+// ---------------------------------------------------------------------------
+// Column sizing standard (every table on this page, every tab)
+// ---------------------------------------------------------------------------
+// One width for every data column so the grid keeps a steady rhythm no matter
+// how long a value is. A short value simply sits inside its column; a value
+// wider than the column is clipped with an ellipsis and the full text is handed
+// to the browser tooltip on hover (see titleIfClipped). Widths stay resizable -
+// these are only the defaults a column starts at.
+const COL_WIDTH = 150;          // standard column width
+const COL_WIDTH_LOCATION = 100; // location columns hold short codes
+const COL_WIDTH_MIN = 80;       // narrowest a drag-resize may go
+const COL_WIDTH_SNO = 80;
+const COL_WIDTH_SELECT = 34;
+
+// The width a column starts at, honouring any width the user has dragged.
+const columnWidthOf = (column, columnWidths = {}) =>
+  columnWidths[column] ||
+  (column.toLowerCase().includes('location') ? COL_WIDTH_LOCATION : COL_WIDTH);
+
+// Native tooltip only where it earns one: on hover, if the text is actually
+// clipped by the column width, hang the whole value off `title`; otherwise leave
+// the attribute off so cells that fit don't flash a redundant tooltip.
+const titleIfClipped = (e) => {
+  const el = e.currentTarget;
+  const text = (el.innerText || el.textContent || '').trim();
+  if (el.scrollWidth > el.clientWidth + 1 && text && text !== '-') {
+    el.setAttribute('title', text);
+  } else {
+    el.removeAttribute('title');
+  }
+};
+
 // Helper function to determine field type based on column name and sample data
 const getFieldType = (column, sampleValue) => {
   if (column.includes('date') || column === 'created_at' || column === 'updated_at' ||
@@ -404,8 +436,8 @@ const ResizableHeader = ({ children, width, onResize, onResizeStart, onResizeEnd
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
     >
-      <div className="flex items-center gap-1">
-        <span>{children}</span>
+      <div className="flex items-center gap-1 overflow-hidden">
+        <span className="min-w-0 truncate" onMouseEnter={titleIfClipped}>{children}</span>
       </div>
       <div
         className={`absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 transition-all ${isResizing ? 'bg-blue-600 w-1.5' : isHovering ? 'bg-blue-400 w-1' : ''
@@ -435,7 +467,8 @@ const SortableTableHeader = ({ id, children, className, style, width, onResizeSt
     backgroundColor: isDragging ? '#f3f4f6' : 'transparent',
     opacity: isDragging ? 0.5 : 1,
     width: width ? `${width}px` : 'auto',
-    minWidth: '80px',
+    minWidth: `${COL_WIDTH_MIN}px`,
+    maxWidth: width ? `${width}px` : undefined,
     ...style,
   };
 
@@ -450,9 +483,9 @@ const SortableTableHeader = ({ id, children, className, style, width, onResizeSt
       {...attributes}
       className={`${className} relative select-none`}
     >
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 overflow-hidden">
         <div
-          className="cursor-grab active:cursor-grabbing opacity-50 hover:opacity-100"
+          className="cursor-grab active:cursor-grabbing opacity-50 hover:opacity-100 shrink-0"
           {...listeners}
           onClick={handleDragHandleClick}
         >
@@ -460,7 +493,7 @@ const SortableTableHeader = ({ id, children, className, style, width, onResizeSt
             <path d="M7 2a2 2 0 10-4 0 2 2 0 004 0zm0 8a2 2 0 10-4 0 2 2 0 004 0zm0 8a2 2 0 10-4 0 2 2 0 004 0zm10-8a2 2 0 10-4 0 2 2 0 004 0zm0 8a2 2 0 10-4 0 2 2 0 004 0zm0-16a2 2 0 10-4 0 2 2 0 004 0z" />
           </svg>
         </div>
-        <span>{children}</span>
+        <span className="min-w-0 truncate" onMouseEnter={titleIfClipped}>{children}</span>
       </div>
       <div
         className={`absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 transition-all ${isResizing ? 'bg-blue-600 w-1.5' : ''
@@ -479,12 +512,12 @@ const FixedTableHeader = ({ children, className, width, minWidth = 60, onResizeS
   return (
     <th
       className={`${className} relative select-none`}
-      style={{ width: width ? `${width}px` : 'auto', minWidth: `${minWidth}px` }}
+      style={{ width: width ? `${width}px` : 'auto', minWidth: `${minWidth}px`, maxWidth: width ? `${width}px` : undefined }}
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
     >
-      <div className="flex items-center gap-1">
-        <span>{children}</span>
+      <div className="flex items-center gap-1 overflow-hidden">
+        <span className="min-w-0 truncate" onMouseEnter={titleIfClipped}>{children}</span>
       </div>
       <div
         className={`absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 transition-all ${isResizing ? 'bg-blue-600 w-1.5' : isHovering ? 'bg-blue-400 w-1' : ''
@@ -928,7 +961,7 @@ const Customer = () => {
     e.preventDefault();
     setResizingColumn(columnId);
     setStartX(e.clientX);
-    setStartWidth(columnWidths[columnId] || 150);
+    setStartWidth(columnWidths[columnId] || COL_WIDTH);
 
     document.addEventListener('mousemove', handleResizeMove);
     document.addEventListener('mouseup', handleResizeEnd);
@@ -938,7 +971,7 @@ const Customer = () => {
     if (!resizingColumn) return;
 
     const diff = e.clientX - startX;
-    const newWidth = Math.max(80, startWidth + diff);
+    const newWidth = Math.max(COL_WIDTH_MIN, startWidth + diff);
     setColumnWidths(prev => ({
       ...prev,
       [resizingColumn]: newWidth
@@ -982,7 +1015,11 @@ const Customer = () => {
     // 'customers' is intentionally absent: it is a derived table built FROM the
     // 12 uploaded files, not an uploaded file itself — nothing to single out.
     'amc_agreements': ['instance_id', 'agreement_status', 'agreement_number', 'agreement_name', 'branch_id', 'agreement_start_date', 'agreement_end_date', 'kva_rating'],
-    'asset_detailed': ['instance_id', 'engine_serial_no', 'branch_id', 'warranty_expiry_date', 'goem_oem', 'segment', 'engine_model', 'kva_rating', 'account_name', 'customer_name', 'contact_phone_number', 'contact_email_id', 'installation_site_address', 'commissioning_date', 'product_segment', 'krm_number', 'krm_status'],
+    // emission_norm is IMPORTANT and lives only here: the Asset Detailed file is
+    // the ONLY import carrying EMISSION NORM (the Asset Service file has no such
+    // column), and the engine-model -> attachment master behind the Welcome
+    // Letter and the drive Letter Master reads its norms straight off this table.
+    'asset_detailed': ['instance_id', 'engine_serial_no', 'branch_id', 'warranty_expiry_date', 'goem_oem', 'segment', 'engine_model', 'kva_rating', 'account_name', 'customer_name', 'contact_phone_number', 'contact_email_id', 'installation_site_address', 'commissioning_date', 'product_segment', 'emission_norm', 'krm_number', 'krm_status'],
     'asset_services': ['instance_id', 'asset_number', 'engine_serial_no', 'branch_id', 'last_oil_change_date', 'last_oil_change_sr_type', 'last_sr_close_date', 'last_closed_sr_number', 'last_sr_type', 'last_sr_subtype', 'last_service_hrs', 'account_name', 'contact_phone_number', 'installation_site_address'],
     // payment_update_date_time is on all four Bandhan tables because the
     // Annual Reports' AMC & Bandhan Projection counts its month column off it.
@@ -1168,7 +1205,7 @@ const Customer = () => {
         const defaultWidths = {};
         columns.forEach(col => {
           if (!columnWidths[col]) {
-            defaultWidths[col] = 150;
+            defaultWidths[col] = columnWidthOf(col);
           }
         });
         if (Object.keys(defaultWidths).length > 0) {
@@ -1176,7 +1213,7 @@ const Customer = () => {
         }
 
         if (!columnWidths['sno-col']) {
-          setColumnWidths(prev => ({ ...prev, 'sno-col': 80 }));
+          setColumnWidths(prev => ({ ...prev, 'sno-col': COL_WIDTH_SNO }));
         }
         if (canExport && !columnWidths['select-col']) {
           setColumnWidths(prev => ({ ...prev, 'select-col': 50 }));
@@ -1593,12 +1630,17 @@ const Customer = () => {
           </h3>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 text-[11px]">
+          <table className="min-w-full divide-y divide-gray-200 text-[11px] table-fixed">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-2.5 py-1.5 text-left font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200">Sr.No.</th>
+                <th className="px-2.5 py-1.5 text-left font-medium text-black uppercase tracking-wider whitespace-nowrap border-r border-gray-200" style={{ width: 70, maxWidth: 70 }}>Sr.No.</th>
                 {columns.map((col, idx) => (
-                  <th key={col} className={`px-2.5 py-1.5 text-left font-medium text-black uppercase tracking-wider whitespace-nowrap ${idx !== columns.length - 1 ? 'border-r border-gray-200' : ''}`}>
+                  <th
+                    key={col}
+                    className={`px-2.5 py-1.5 text-left font-medium text-black uppercase tracking-wider truncate ${idx !== columns.length - 1 ? 'border-r border-gray-200' : ''}`}
+                    style={{ width: columnWidthOf(col), maxWidth: columnWidthOf(col) }}
+                    onMouseEnter={titleIfClipped}
+                  >
                     {col.replace(/_/g, ' ')}
                   </th>
                 ))}
@@ -1607,9 +1649,14 @@ const Customer = () => {
             <tbody className="bg-white divide-y divide-gray-100">
               {data.map((record, idx) => (
                 <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-2.5 py-1.5 whitespace-nowrap text-black text-center border-r border-gray-200">{idx + 1}</td>
+                  <td className="px-2.5 py-1.5 whitespace-nowrap text-black text-center border-r border-gray-200" style={{ width: 70, maxWidth: 70 }}>{idx + 1}</td>
                   {columns.map((col, colIdx) => (
-                    <td key={col} className={`px-2.5 py-1.5 whitespace-nowrap text-black ${colIdx !== columns.length - 1 ? 'border-r border-gray-200' : ''}`}>
+                    <td
+                      key={col}
+                      className={`px-2.5 py-1.5 text-black truncate ${colIdx !== columns.length - 1 ? 'border-r border-gray-200' : ''}`}
+                      style={{ width: columnWidthOf(col), maxWidth: columnWidthOf(col) }}
+                      onMouseEnter={titleIfClipped}
+                    >
                       {formatValue(record[col])}
                     </td>
                   ))}
@@ -1861,19 +1908,18 @@ const Customer = () => {
             ) : (
               <DndContext collisionDetection={closestCenter} onDragEnd={handleColumnDragEnd}>
                 <SortableContext items={[...FIXED_COLUMNS, ...getOrderedColumns()]} strategy={horizontalListSortingStrategy}>
-                  <table className="w-full border-collapse min-w-[800px]">
+                  <table className="w-full border-collapse min-w-[800px] table-fixed">
                     <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
                         {canExport && (
-                          <FixedTableHeader className="px-2 py-1 w-8 bg-gray-50 border-r-2 border-gray-300" width={columnWidths['select-col'] || 34} minWidth={34} onResizeStart={(e) => handleResizeStart(e, 'select-col')} isResizing={resizingColumn === 'select-col'}>
+                          <FixedTableHeader className="px-2 py-1 w-8 bg-gray-50 border-r-2 border-gray-300" width={columnWidths['select-col'] || COL_WIDTH_SELECT} minWidth={COL_WIDTH_SELECT} onResizeStart={(e) => handleResizeStart(e, 'select-col')} isResizing={resizingColumn === 'select-col'}>
                             <input type="checkbox" checked={selectedRows.length === tableData.length && tableData.length > 0} onChange={handleSelectAll} className="rounded border-gray-300 w-3.5 h-3.5 cursor-pointer" style={{ accentColor: themeColor }} />
                           </FixedTableHeader>
                         )}
-                        <FixedTableHeader className="px-2.5 py-1 text-left text-[11px] font-medium text-black uppercase tracking-wider min-w-[60px] whitespace-nowrap border-r-2 border-gray-300" width={columnWidths['sno-col'] || 80} onResizeStart={(e) => handleResizeStart(e, 'sno-col')} isResizing={resizingColumn === 'sno-col'}>
+                        <FixedTableHeader className="px-2.5 py-1 text-left text-[11px] font-medium text-black uppercase tracking-wider min-w-[60px] whitespace-nowrap border-r-2 border-gray-300" width={columnWidths['sno-col'] || COL_WIDTH_SNO} onResizeStart={(e) => handleResizeStart(e, 'sno-col')} isResizing={resizingColumn === 'sno-col'}>
                           Sr. No.
                         </FixedTableHeader>
                         {getOrderedColumns().map((column, index) => {
-                          const isLocationColumn = column.toLowerCase().includes('location');
                           // BOLD marks an IMPORTANT column — one the app matches,
                           // reports or builds the customer master on. Every other
                           // header (fixed reference field or dynamic extra_data one)
@@ -1883,7 +1929,7 @@ const Customer = () => {
                           // it has no important subset to single out.
                           const isImportant = (IMPORTANT_DB_FIELDS[currentTable.id] || []).includes(column);
                           return (
-                            <SortableTableHeader key={column} id={column} className={`px-2.5 py-1 text-left text-[11px] ${isImportant ? 'font-bold' : 'font-medium'} text-black uppercase tracking-wider ${isLocationColumn ? 'min-w-[90px]' : 'min-w-[140px]'} whitespace-nowrap ${index !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-300' : ''}`} width={columnWidths[column] || (isLocationColumn ? 100 : 150)} onResizeStart={(e) => handleResizeStart(e, column)} isResizing={resizingColumn === column}>
+                            <SortableTableHeader key={column} id={column} className={`px-2.5 py-1 text-left text-[11px] ${isImportant ? 'font-bold' : 'font-medium'} text-black uppercase tracking-wider whitespace-nowrap ${index !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-300' : ''}`} width={columnWidthOf(column, columnWidths)} onResizeStart={(e) => handleResizeStart(e, column)} isResizing={resizingColumn === column}>
                               {column.replace(/_/g, ' ')}
                             </SortableTableHeader>
                           );
@@ -1894,23 +1940,25 @@ const Customer = () => {
                       {tableData.map((record, index) => (
                         <tr key={record.id || record.instance_id || index} className="hover:bg-gray-50 transition-all group cursor-pointer" onClick={(e) => handleView(record, e)}>
                           {canExport && (
-                            <td className="px-2 py-1 bg-white group-hover:bg-gray-50 border-r-2 border-gray-200" style={{ width: columnWidths['select-col'] || 34 }} onClick={(e) => e.stopPropagation()}>
+                            <td className="px-2 py-1 bg-white group-hover:bg-gray-50 border-r-2 border-gray-200" style={{ width: columnWidths['select-col'] || COL_WIDTH_SELECT }} onClick={(e) => e.stopPropagation()}>
                               <input type="checkbox" checked={selectedRows.includes(record.id)} onChange={() => handleRowSelect(record.id)} className="rounded border-gray-300 w-3.5 h-3.5 cursor-pointer" style={{ accentColor: themeColor }} />
                             </td>
                           )}
-                          <td className="px-2.5 py-1 text-xs text-black text-center bg-white group-hover:bg-gray-50 border-r-2 border-gray-200" style={{ width: columnWidths['sno-col'] || 80 }}>
+                          <td className="px-2.5 py-1 text-xs text-black text-center bg-white group-hover:bg-gray-50 border-r-2 border-gray-200" style={{ width: columnWidths['sno-col'] || COL_WIDTH_SNO }}>
                             {(currentPage - 1) * pageSize + index + 1}
                           </td>
                           {getOrderedColumns().map((column, colIndex) => {
-                            const isLocationColumn = column.toLowerCase().includes('location');
                             const cellValue = formatValue(record[column]);
-                            const cellWidth = columnWidths[column] || (isLocationColumn ? 100 : 150);
+                            const cellWidth = columnWidthOf(column, columnWidths);
+                            // Every column, not just the short ones: the value stays
+                            // inside its width, clips with an ellipsis when longer, and
+                            // the full text arrives as a tooltip (titleIfClipped).
                             return (
                               <td
                                 key={column}
-                                className={`px-2.5 py-1 text-xs text-black whitespace-nowrap ${isLocationColumn ? 'overflow-hidden text-ellipsis' : ''} ${colIndex !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-200' : ''}`}
-                                style={{ width: cellWidth, ...(isLocationColumn ? { maxWidth: cellWidth } : {}) }}
-                                title={isLocationColumn && cellValue !== '-' ? cellValue : undefined}
+                                className={`px-2.5 py-1 text-xs text-black truncate ${colIndex !== getOrderedColumns().length - 1 ? 'border-r-2 border-gray-200' : ''}`}
+                                style={{ width: cellWidth, maxWidth: cellWidth }}
+                                onMouseEnter={titleIfClipped}
                               >
                                 {highlightText(cellValue, globalSearchTerm)}
                               </td>

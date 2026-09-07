@@ -38,6 +38,12 @@ const ALLOWED_STYLE_PROPS = new Set([
     'border-color', 'border-style', 'border-width', 'border-collapse',
     'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
     'width', 'height', 'min-width',
+    // the bullet a list was authored with (Letter Master picks • ○ ■ ✦ ❖ ➤ ✔);
+    // purely decorative, and UNSAFE_VALUE still bars url()/expression()
+    'list-style', 'list-style-type', 'list-style-position',
+    // the gap a letter paragraph carries after it — set by the Gap control in
+    // LetterParaEditor and honoured by the printed / emailed letter
+    'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
 ]);
 
 const UNSAFE_VALUE = /url\s*\(|expression\s*\(|javascript:|@import|behaviou?r\s*:/i;

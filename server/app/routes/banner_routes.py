@@ -16,7 +16,7 @@ def get_db():
         db.close()
 
 @router.get("")
-async def get_banners(db: Session = Depends(get_db)):
+def get_banners(db: Session = Depends(get_db)):
     """Get all banners"""
     try:
         banners = banner_controller.get_all_banners(db)

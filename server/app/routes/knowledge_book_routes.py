@@ -46,7 +46,7 @@ def _is_master_admin(db: Session, user_id: Optional[str], user_role: Optional[st
 # ---------------- READ ---------------- #
 
 @router.get("/folders")
-async def list_folder(
+def list_folder(
     parent_id: Optional[int] = None,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -70,13 +70,13 @@ async def list_folder(
 # ---------------- CATEGORIES ---------------- #
 
 @router.get("/categories")
-async def list_categories(db: Session = Depends(get_db)):
+def list_categories(db: Session = Depends(get_db)):
     """Available to any logged-in user (used for upload + filtering)."""
     return {"success": True, "categories": kb.list_categories(db)}
 
 
 @router.post("/categories")
-async def create_category(
+def create_category(
     name: str = Form(...),
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -88,7 +88,7 @@ async def create_category(
 
 
 @router.put("/categories/{category_id}")
-async def rename_category(
+def rename_category(
     category_id: int,
     name: str = Form(...),
     user_id: Optional[str] = Header(None),
@@ -101,7 +101,7 @@ async def rename_category(
 
 
 @router.delete("/categories/{category_id}")
-async def delete_category(
+def delete_category(
     category_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -115,7 +115,7 @@ async def delete_category(
 # ---------------- PRODUCTS (dropdown) ---------------- #
 
 @router.get("/products")
-async def list_products(
+def list_products(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -127,7 +127,7 @@ async def list_products(
 # ---------------- FOLDER WRITES (master_admin only) ---------------- #
 
 @router.post("/folders")
-async def create_folder(
+def create_folder(
     name: str = Form(...),
     parent_id: Optional[int] = Form(None),
     description: Optional[str] = Form(None),
@@ -141,7 +141,7 @@ async def create_folder(
 
 
 @router.post("/folders/products")
-async def create_product_folders(
+def create_product_folders(
     products: list[str] = Form(...),
     parent_id: int = Form(...),
     description: Optional[str] = Form(None),
@@ -157,7 +157,7 @@ async def create_product_folders(
 
 
 @router.put("/folders/{folder_id}")
-async def rename_folder(
+def rename_folder(
     folder_id: int,
     name: str = Form(...),
     description: Optional[str] = Form(None),
@@ -171,7 +171,7 @@ async def rename_folder(
 
 
 @router.patch("/folders/{folder_id}/hide")
-async def toggle_hide(
+def toggle_hide(
     folder_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -183,7 +183,7 @@ async def toggle_hide(
 
 
 @router.delete("/folders/{folder_id}")
-async def delete_folder(
+def delete_folder(
     folder_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -217,7 +217,7 @@ async def upload_files(
 
 
 @router.put("/files/{file_id}")
-async def update_file(
+def update_file(
     file_id: int,
     name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
@@ -232,7 +232,7 @@ async def update_file(
 
 
 @router.patch("/files/{file_id}/hide")
-async def toggle_hide_file(
+def toggle_hide_file(
     file_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -244,7 +244,7 @@ async def toggle_hide_file(
 
 
 @router.delete("/files/{file_id}")
-async def delete_file(
+def delete_file(
     file_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -258,7 +258,7 @@ async def delete_file(
 # ---------------- VIEW / DOWNLOAD (any logged-in user) ---------------- #
 
 @router.get("/files/{file_id}/view")
-async def view_file(file_id: int, db: Session = Depends(get_db)):
+def view_file(file_id: int, db: Session = Depends(get_db)):
     row = kb.get_file(db, file_id)
     if row.data is None:
         raise HTTPException(status_code=404, detail="File data is missing")
@@ -266,7 +266,7 @@ async def view_file(file_id: int, db: Session = Depends(get_db)):
     return Response(content=row.data, media_type=media_type)
 
 @router.get("/files/all")
-async def list_all_files(
+def list_all_files(
     category_id: Optional[int] = None,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -278,7 +278,7 @@ async def list_all_files(
             "files": kb.list_all_files(db, is_admin, category_id)}
 
 @router.get("/files/{file_id}/download")
-async def download_file(file_id: int, db: Session = Depends(get_db)):
+def download_file(file_id: int, db: Session = Depends(get_db)):
     row = kb.get_file(db, file_id)
     if row.data is None:
         raise HTTPException(status_code=404, detail="File data is missing")
@@ -289,7 +289,7 @@ async def download_file(file_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/folders/{folder_id}/download")
-async def download_folder(
+def download_folder(
     folder_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),

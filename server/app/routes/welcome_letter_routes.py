@@ -1,7 +1,7 @@
 from typing import List, Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -37,6 +37,18 @@ def _require_user(db: Session, user_id: Optional[str]):
     return user, wc.allowed_branches(db, user)
 
 
+def _require_login(db: Session, user_id: Optional[str]):
+    """Any signed-in user. The drive letter is written by employees too, so the
+    engine-model lookup cannot sit behind the Welcome Letter's own role gate —
+    it only ever returns a file the Master Admin already published."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user or user.is_blocked or user.is_deleted:
+        raise HTTPException(status_code=401, detail="Login required")
+    return user
+
+
 def _require_master_admin(db: Session, user_id: Optional[str], user_role: Optional[str]):
     role = user_role
     if not role and user_id:
@@ -54,10 +66,22 @@ class LetterTextIn(BaseModel):
     letter_text: str
 
 
+class AttachmentNameIn(BaseModel):
+    file_name: str
+
+
+class CustomerEmailIn(BaseModel):
+    email: str
+
+
+class EngineModelsIn(BaseModel):
+    engine_models: List[str]
+
+
 # ---------------- ENTRIES (pending / sent list) ---------------- #
 
 @router.get("/entries")
-async def get_entries(
+def get_entries(
     branch: Optional[str] = None,
     status: Optional[str] = None,          # PENDING | SENT
     search: Optional[str] = None,
@@ -69,7 +93,7 @@ async def get_entries(
 
 
 @router.get("/pending-count")
-async def get_pending_count(
+def get_pending_count(
     user_id: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
@@ -79,7 +103,7 @@ async def get_pending_count(
 
 
 @router.post("/sync")
-async def resync(
+def resync(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -94,7 +118,7 @@ async def resync(
 # ---------------- LETTER PREVIEW / SEND ---------------- #
 
 @router.get("/letter/{entry_id}")
-async def get_letter(
+def get_letter(
     entry_id: int,
     user_id: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -104,7 +128,7 @@ async def get_letter(
 
 
 @router.post("/send/{entry_id}")
-async def send_letter(
+def send_letter(
     entry_id: int,
     email: Optional[str] = None,
     cc: Optional[str] = None,
@@ -117,10 +141,37 @@ async def send_letter(
                           attachment_ids=attachments, allowed=allowed)
 
 
+@router.post("/customer-email/{entry_id}")
+def save_customer_email(
+    entry_id: int,
+    payload: CustomerEmailIn,
+    user_id: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """An email typed into the preview's To box is written onto the customers
+    table right away — most of the time the sender is supplying an address the
+    customer record simply did not have."""
+    _user, allowed = _require_user(db, user_id)
+    return wc.save_customer_email(db, entry_id, payload.email, allowed)
+
+
+@router.get("/model-attachment")
+def get_model_attachment(
+    engine_model: str,
+    content: int = 0,                      # 1 -> include the bytes, base64
+    user_id: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """The shared master's file for one engine model. Used by drive letters
+    whose format has 'Use model-wise attachment' switched on."""
+    _require_login(db, user_id)
+    return wc.model_attachment_for(db, engine_model, with_content=bool(content))
+
+
 # ---------------- REPORT ---------------- #
 
 @router.get("/report")
-async def get_report(
+def get_report(
     branch: Optional[str] = None,
     user: Optional[str] = None,            # users.user_id of the sender
     user_id: Optional[str] = Header(None),
@@ -133,7 +184,7 @@ async def get_report(
 # ---------------- MASTER SETUP ---------------- #
 
 @router.get("/master")
-async def get_master(
+def get_master(
     user_id: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
@@ -142,7 +193,7 @@ async def get_master(
 
 
 @router.post("/master/letter-text")
-async def save_letter_text(
+def save_letter_text(
     payload: LetterTextIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -153,7 +204,7 @@ async def save_letter_text(
 
 
 @router.post("/master/attachments")
-async def add_default_attachments(
+def add_default_attachments(
     files: List[UploadFile] = File(...),     # one or many — multi-select upload
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -163,8 +214,22 @@ async def add_default_attachments(
     return wc.add_default_attachments(db, files, user_id)
 
 
+@router.patch("/master/attachments/{att_id}")
+def rename_default_attachment(
+    att_id: int,
+    payload: AttachmentNameIn,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Rename a master attachment — the file the customer receives keeps its
+    bytes and its extension, only the visible name changes."""
+    _require_master_admin(db, user_id, user_role)
+    return wc.rename_attachment(db, att_id, payload.file_name)
+
+
 @router.delete("/master/attachments/{att_id}")
-async def delete_default_attachment(
+def delete_default_attachment(
     att_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -174,15 +239,81 @@ async def delete_default_attachment(
     return wc.delete_default_attachment(db, att_id)
 
 
-@router.get("/master/files/{item_id}")
-async def download_attachment(
-    item_id: int,
+# ---------------- MASTER SETUP → MODEL-WISE ATTACHMENTS ---------------- #
+
+@router.post("/master/model-attachments")
+def add_model_attachment(
+    file: UploadFile = File(...),
+    engine_models: str = Form(...),          # comma separated, from the dropdown
     user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
+    """Upload one file and map the chosen engine models to it — a customer on
+    any of those models gets this file automatically, on top of the defaults."""
+    _require_master_admin(db, user_id, user_role)
+    return wc.add_model_attachment(db, file, engine_models, user_id)
+
+
+@router.post("/master/model-attachments/{att_id}/models")
+def add_models_to_attachment(
+    att_id: int,
+    payload: EngineModelsIn,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Point more engine models at a file that is already mapped."""
+    _require_master_admin(db, user_id, user_role)
+    return wc.add_models_to_attachment(db, att_id, payload.engine_models, user_id)
+
+
+@router.delete("/master/model-rules/{rule_id}")
+def delete_model_rule(
+    rule_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Unmap one engine model — the model returns to the dropdown."""
+    _require_master_admin(db, user_id, user_role)
+    return wc.delete_model_rule(db, rule_id)
+
+
+@router.delete("/master/model-attachments/{att_id}")
+def delete_model_attachment(
+    att_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Delete a model-wise file and every engine model mapped to it."""
+    _require_master_admin(db, user_id, user_role)
+    return wc.delete_model_attachment(db, att_id)
+
+
+@router.get("/master/files/{item_id}")
+def download_attachment(
+    item_id: int,
+    user_id: Optional[str] = Header(None),
+    if_none_match: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """The attachment's bytes. The sender flips between the same few files all
+    day, so the response is cacheable and revalidates with an ETag — the second
+    view of a file costs one 304 instead of pulling the blob out of SQL Server
+    again."""
     _require_user(db, user_id)
-    data, name, ctype = wc.attachment_file(db, item_id)
-    return Response(
-        content=data, media_type=ctype,
-        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(name or 'file')}"},
-    )
+    # Answered BEFORE the blob is touched — a conditional GET that still read
+    # the file out of SQL Server would cost as much as serving it.
+    if if_none_match:
+        known = wc.attachment_etag(db, item_id)
+        if known and known in (t.strip() for t in if_none_match.split(",")):
+            return Response(status_code=304, headers={
+                "ETag": known, "Cache-Control": "private, max-age=86400"})
+    data, name, ctype, etag = wc.attachment_file(db, item_id)
+    return Response(content=data, media_type=ctype, headers={
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(name or 'file')}",
+        "Cache-Control": "private, max-age=86400",
+        "ETag": etag,
+    })

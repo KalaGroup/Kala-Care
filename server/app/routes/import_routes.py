@@ -1,22 +1,24 @@
 # import_router.py
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, Depends, Header, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text, inspect
-from typing import List
+from typing import List, Optional
 import uuid
 import time
 from datetime import datetime, timezone
 
 from app.database import SessionLocal
 from app.controllers.import_controller import ImportController
+from app.controllers.user_controller import can_upload_import_file
 from app.time_utils import now_ist
+from app.models.user_model import User
 from app.models.customer_model import (
     AMCAgreement, AssetDetailed, AssetService,
     AnubandhanPlusQuote, AnubandhanQuote, BandhanPlusQuote,
     PulseQuotation, RegularBandhan, LMSData, OpenSRLoadReport, MaxTTROilChangeSRZeroLabourFlag,
     ResponseTimeMaxTTR, CDIDetailReport, EFSRReport, AMCExpiryPlanner, LMSInsia,
-    AllInvoiceReport
+    AllInvoiceReport, ImportUploadLog
 )
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -70,8 +72,24 @@ def normalize_file_type(file_type: str) -> str:
     return LEGACY_FILE_TYPES.get(file_type, file_type)
 
 
+def _require_upload_rights(db: Session, user_id: Optional[str], file_type: str) -> User:
+    """Who may upload THIS file: the Master Admin always; anyone else needs the
+    per-user Data Upload flag, and their per-file list (users.import_files) then
+    says which files — both granted from the Profile page. Resolved from the DB,
+    never from anything the client claims about itself."""
+    user = (db.query(User).filter(User.user_id == (user_id or "")).first()
+            if user_id else None)
+    if not user or getattr(user, "is_deleted", False) or user.is_blocked:
+        raise HTTPException(status_code=403,
+                            detail="You do not have access to the Data Upload page")
+    if not can_upload_import_file(user, file_type):
+        raise HTTPException(status_code=403,
+                            detail=f"You are not allowed to upload '{file_type}'")
+    return user
+
+
 def run_import_job(job_id: str, file_contents: bytes, filename: str, file_type: str,
-                   column_mapping: dict = None):
+                   column_mapping: dict = None, uploaded_by: str = None):
     """Background task — runs the actual import with its own DB session"""
     db = SessionLocal()
     try:
@@ -105,6 +123,18 @@ def run_import_job(job_id: str, file_contents: bytes, filename: str, file_type: 
             ),
             "finished_at": now_ist().isoformat(),
         })
+        # WHO uploaded — the page's "Last data update" line names the uploader
+        # from this log (the data tables themselves only carry updated_at).
+        try:
+            db.add(ImportUploadLog(
+                file_type=file_type, file_name=(filename or "")[:255],
+                uploaded_by=uploaded_by,
+                imported_count=result["imported"], updated_count=result["updated"],
+                total_processed=result["total_processed"],
+            ))
+            db.commit()
+        except Exception:
+            db.rollback()          # the log must never fail an import that succeeded
         # New data landed → drop cached last-updated so the next read is fresh
         _last_updated_cache.clear()
 
@@ -124,6 +154,8 @@ async def import_excel(
     file: UploadFile = File(...),
     file_type: str = Form(...),
     column_mapping: str = Form(None),
+    user_id: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
 ):
     """
     Accepts the file and immediately returns a job_id.
@@ -136,6 +168,7 @@ async def import_excel(
             status_code=400,
             detail=f"Invalid file type. Must be one of: {', '.join(FILE_TYPES)}"
         )
+    _require_upload_rights(db, user_id, file_type)
     if not file.filename.lower().endswith(ACCEPTED_UPLOAD_EXTENSIONS):
         raise HTTPException(
             status_code=400,
@@ -173,7 +206,8 @@ async def import_excel(
         "total_processed": 0,
     }
 
-    background_tasks.add_task(run_import_job, job_id, contents, file.filename, file_type, mapping)
+    background_tasks.add_task(run_import_job, job_id, contents, file.filename, file_type,
+                              mapping, user_id)
 
     # Return immediately — no timeout possible
     return JSONResponse(
@@ -187,7 +221,7 @@ async def import_excel(
 
 
 @router.get("/status/{job_id}")
-async def get_import_status(job_id: str):
+def get_import_status(job_id: str):
     """Poll this endpoint to check if the background import finished"""
     job = import_jobs.get(job_id)
     if not job:
@@ -264,7 +298,7 @@ def _ensure_updated_at_indexes(db: Session):
 
 
 @router.get("/last-updated")
-async def get_last_updated(file_type: str, db: Session = Depends(get_db)):
+def get_last_updated(file_type: str, db: Session = Depends(get_db)):
     """Newest updated_at + record count for a file type. Served from cache when fresh."""
     file_type = normalize_file_type(file_type)
     model = FILE_TYPE_MODELS.get(file_type)
@@ -291,10 +325,27 @@ async def get_last_updated(file_type: str, db: Session = Depends(get_db)):
         if last_updated else None
     )
 
+    # WHO uploaded last — from the upload log (older data predates the log, so
+    # the fields stay null there and the page simply shows no uploader).
+    uploaded_by = uploaded_by_name = None
+    try:
+        last_log = (db.query(ImportUploadLog)
+                    .filter(ImportUploadLog.file_type == file_type)
+                    .order_by(ImportUploadLog.id.desc()).first())
+        if last_log and last_log.uploaded_by:
+            uploaded_by = last_log.uploaded_by
+            uploader = (db.query(User)
+                        .filter(User.user_id == last_log.uploaded_by).first())
+            uploaded_by_name = uploader.name if uploader else last_log.uploaded_by
+    except Exception:
+        pass                      # the uploader line is optional, never a 500
+
     payload = {
         "file_type": file_type,
         "last_updated": last_updated_iso,
         "total_records": total_records or 0,
+        "uploaded_by": uploaded_by,
+        "uploaded_by_name": uploaded_by_name,
     }
     _last_updated_cache[file_type] = {"payload": payload, "ts": time.time()}
     return payload
@@ -304,6 +355,8 @@ async def get_last_updated(file_type: str, db: Session = Depends(get_db)):
 async def import_multiple(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
+    user_id: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
 ):
     """Queue multiple files at once, returns a list of job IDs"""
     job_ids = []
@@ -320,6 +373,18 @@ async def import_multiple(
             })
             continue
 
+        # Same per-user, per-file right as the single upload; a blocked file is
+        # skipped with a message instead of failing the whole batch.
+        try:
+            _require_upload_rights(db, user_id, file_type)
+        except HTTPException as e:
+            job_ids.append({
+                "filename": file.filename,
+                "status": "skipped",
+                "message": e.detail,
+            })
+            continue
+
         contents = await file.read()
         job_id = str(uuid.uuid4())
         import_jobs[job_id] = {
@@ -332,12 +397,13 @@ async def import_multiple(
             "updated_count": 0,
             "total_processed": 0,
         }
-        background_tasks.add_task(run_import_job, job_id, contents, file.filename, file_type)
+        background_tasks.add_task(run_import_job, job_id, contents, file.filename, file_type,
+                                  None, user_id)
         job_ids.append({"filename": file.filename, "job_id": job_id, "status": "queued"})
 
     return {"jobs": job_ids}
 
 
 @router.get("/file-types")
-async def get_file_types():
+def get_file_types():
     return {"file_types": FILE_TYPES}

@@ -6,7 +6,7 @@ import axios from 'axios';
 import SitemapModal from './SitemapModal';
 import { prefetchRoute } from '../routePrefetch';
 import { applyTheme } from '../theme';
-import { canAccessPartDetail, canAccessMom, canAccessApproval, canViewAop, canAccessPmsPage, canAccessQuotationTracker } from '../utils/pagePermission';
+import { canAccessPartDetail, canAccessMom, canAccessApproval, canViewAop, canAccessPmsPage, canAccessQuotationTracker, canAccessDataUpload } from '../utils/pagePermission';
 import { getSummary as getApprovalSummary } from './approval/approvalApi';
 
 import {
@@ -255,7 +255,7 @@ const partDetailItems = [
 // "AOP & Master" is outside that list because it has its own view/edit right.
 const pmsItems = [
   { path: '/aop-master', name: 'AOP & Master' },
-  { path: '/sales-labour-report', name: 'Sales & Labour Report' },
+  { path: '/sales-labour-report', name: 'Part & Labour Sale' },
   { path: '/employee-productivity', name: 'Employee Productivity' },
   { path: '/sr-allocation', name: 'SR Allocation Report' },
   { path: '/se-performance', name: 'SE Performance' },
@@ -975,7 +975,8 @@ function Navbar({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.user_id, canSeeWelcomeLetter, location.pathname]);
 
-  // Engagement Masters dropdown items — master/IT admin only.
+  // Engagement Masters dropdown items — master admin, plus Data-Upload for any
+  // branch admin / employee granted "Data Upload Access" from Profile.
   // (Moved out of the flat main nav into one grouped dropdown.)
   const getEngagementMastersItems = () => {
     const allItems = [
@@ -984,7 +985,9 @@ function Navbar({ children }) {
         name: 'Data - Upload',
         icon: CloudArrowUpIcon,
         description: 'Upload customer data',
-        allowedRoles: ['master_admin']
+        allowedRoles: ['master_admin'],
+        // The per-user flag opens this one item without the role.
+        allowIf: () => canAccessDataUpload(user)
       },
       {
         path: '/customers',
@@ -1012,7 +1015,7 @@ function Navbar({ children }) {
       if (hiddenUserIds.includes(String(user?.user_id)) && restrictedPaths.includes(item.path)) {
         return false;
       }
-      return item.allowedRoles.includes(user?.role);
+      return item.allowedRoles.includes(user?.role) || (item.allowIf ? item.allowIf() : false);
     });
   };
 
@@ -1799,9 +1802,11 @@ function Navbar({ children }) {
               >
                 <NavLinks items={mainNavItems} collapsed={!sidebarOpen} hoveredItem={hoveredItem} setHoveredItem={setHoveredItem} />
 
-                {/* Engagement Masters — master/IT admin only. Groups Data-Upload,
-                  Customers Data Bouquet and Drive Creation under one dropdown. */}
-                {isMasterOrITAdmin && engagementMastersItems.length > 0 && (
+                {/* Engagement Masters — items are permission-filtered above:
+                  master admin gets all three, a user with Data Upload Access
+                  gets that one item. Groups Data-Upload, Customers Data Hub
+                  and Drive Creation under one dropdown. */}
+                {engagementMastersItems.length > 0 && (
                   sidebarOpen ? (
                     <div className="mt-1">
                       <button

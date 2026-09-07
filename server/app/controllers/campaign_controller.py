@@ -1341,6 +1341,11 @@ class CampaignController:
         payload["default_recipients"] = payload.get("default_recipients") or []
         payload["service_cycle_rows"] = payload.get("service_cycle_rows") or []
         payload["include_service_cycle"] = bool(payload.get("include_service_cycle"))
+        payload["use_model_attachments"] = bool(payload.get("use_model_attachments"))
+        payload["editable_fields"] = payload.get("editable_fields") or {}
+        # the subject used to be the format name; keep that true when none is given
+        if not (payload.get("subject") or "").strip():
+            payload["subject"] = name
 
         # Default serial_start to '1' if not provided
         if not payload.get("serial_start"):
@@ -1379,6 +1384,8 @@ class CampaignController:
                            "service_cycle_rows"):
             if list_field in update_data and update_data[list_field] is None:
                 update_data[list_field] = []
+        if "editable_fields" in update_data and update_data["editable_fields"] is None:
+            update_data["editable_fields"] = {}
 
         # Default serial_start to '1' if explicitly set to empty
         if "serial_start" in update_data and not update_data["serial_start"]:

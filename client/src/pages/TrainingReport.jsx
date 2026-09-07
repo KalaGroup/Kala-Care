@@ -127,9 +127,9 @@ const TABLE = 'w-full text-[11.5px] border-collapse border border-gray-300';
 // them ever breaks in the middle of a number. '' means AUTO: those columns
 // (Occupation, Skill Names, Branch Name) split whatever width is left, which
 // is where the prose actually needs it.
-//        Sr.    Name     UID    Ticket   Occup. Status  Sk     Trn    SkillNm Branch Bid    Hire
-const EMP_COLS = ['52px', '150px', '92px', '106px', '', '84px', '64px', '84px', '', '', '86px', '96px'];
-const EMP_MIN = 'min-w-[1360px]';
+//        Sr.    Name     UID    Ticket  E Code  Occup. Status  Sk     Trn    SkillNm Branch Bid    Hire
+const EMP_COLS = ['52px', '150px', '92px', '106px', '88px', '', '84px', '64px', '84px', '', '', '86px', '96px'];
+const EMP_MIN = 'min-w-[1460px]';
 // The skill list is one row per SKILL, and its people count is the ONLY count on
 // it: 'Training Records' was dropped because a repeat training of the same skill
 // made that number disagree with the employee count for no reader's benefit.
@@ -161,10 +161,13 @@ const StatusBadge = ({ value, manual }) => {
     : value === 'Inactive'
       ? 'This employee has left — their training history is kept'
       : undefined;
+  // The word and nothing else. A hand-set status used to carry a ✎ next to it;
+  // the column reads better without one, and 'STATUS SET BY' in the export plus
+  // the tooltip here still say where the value came from.
   return (
-    <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-bold ${tone} ${manual ? 'ring-1 ring-gray-400' : ''}`}
+    <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-bold ${tone}`}
       title={title}>
-      {value || 'Not set'}{manual ? ' ✎' : ''}
+      {value || 'Not set'}
     </span>
   );
 };
@@ -650,6 +653,16 @@ const StatusEditor = ({ emp, onSave, onClear, busy }) => {
               Mark as left
             </button>
           )}
+          {/* Already left — the FILE marks a leaver but never says when or why,
+              so the date and reason can be typed here (and edited later). Saved
+              as the shared typed status, so the SE UID Master shows it too. */}
+          {emp.current_status === 'Inactive' && (
+            <button onClick={() => open('Inactive')} disabled={busy}
+              title="Add or edit the last working day and reason — shared with the SE UID Master on the Profile page"
+              className={`${BTN} border border-red-300 bg-white text-red-700 hover:bg-red-50`}>
+              {(emp.left_on || emp.status_reason) ? 'Edit leaving details' : 'Add leaving details'}
+            </button>
+          )}
           {emp.current_status !== 'Active' && (
             <button onClick={() => open('Active')} disabled={busy}
               title="Record that this employee is still with us"
@@ -750,6 +763,7 @@ const DetailModal = ({ stack, onPush, onPop, onClose, employees, skillIndex,
   const pairs = emp ? [
     ['UID NO', emp.uid_no],
     ['EMPLOYEE TICKET NUMBER', emp.employee_ticket_number],
+    ['E CODE', emp.e_code],
     ['FULL NAME', emp.full_name],
     ['OCCUPATION', emp.occupation],
     ['BRANCH NAME', emp.branch_name],
@@ -1101,7 +1115,8 @@ const TrainingReport = () => {
       if (!qs) return true;
       return squash(e.full_name).includes(qs)
         || squash(e.uid_no).includes(qs)
-        || squash(e.employee_ticket_number).includes(qs);
+        || squash(e.employee_ticket_number).includes(qs)
+        || squash(e.e_code).includes(qs);
     });
   }, [mode, employees, inScope, trained, qs]);
 
@@ -1156,7 +1171,8 @@ const TrainingReport = () => {
         ...s,
         rows: s.rows.filter((r) => squash(r.full_name).includes(qs)
           || squash(r.uid_no).includes(qs)
-          || squash(r.employee_ticket_number).includes(qs)),
+          || squash(r.employee_ticket_number).includes(qs)
+          || squash(r.e_code).includes(qs)),
       }))
       .filter((s) => s.rows.length)
       .map((s) => ({
@@ -1191,6 +1207,7 @@ const TrainingReport = () => {
     name: (e) => e.full_name,
     uid: (e) => e.uid_no,
     ticket: (e) => e.employee_ticket_number,
+    ecode: (e) => e.e_code || '',
     occupation: (e) => e.occupation,
     status: (e) => e.current_status || '',
     skills: (e) => e.skill_names.length,
@@ -1245,6 +1262,7 @@ const TrainingReport = () => {
       ).forEach((e) => {
         const base = {
           'UID NO': e.uid_no, 'EMPLOYEE TICKET NUMBER': e.employee_ticket_number || '',
+          'E CODE': e.e_code || '',
           'FULL NAME': e.full_name, 'OCCUPATION': e.occupation || '',
           'BRANCH NAME': e.branch_name || '', 'BRANCH ID': e.branch_id || '',
           'HIRE DATE': d(e.hire_date),
@@ -1276,6 +1294,7 @@ const TrainingReport = () => {
           SKILL: s.skill,
           'FULL NAME': r.full_name, 'UID NO': r.uid_no,
           'EMPLOYEE TICKET NUMBER': r.employee_ticket_number || '',
+          'E CODE': r.e_code || '',
           'OCCUPATION': r.occupation || '',
           'CURRENT STATUS': r.current_status || '',
           'STATUS SET BY': r.status_source === 'manual' ? 'Manually' : (r.file_status ? 'File' : ''),
@@ -1405,6 +1424,11 @@ const TrainingReport = () => {
                 <Tile label="No training" value={num(meta.untrained)} tone={meta.untrained ? 'warn' : 'default'} />
                 <Tile label="Skills" value={num(meta.skills)} />
                 <Tile label="Training records" value={num(meta.rows)} />
+                {/* Fills the grid's 8th slot: how many branches the master
+                    covers — the same list the "All branches" filter offers.
+                    Blank-branch employees are not a branch, so they don't count. */}
+                <Tile label="Branches" value={num((meta.branches || [])
+                  .filter((b) => b.branch_id || b.branch_name).length)} />
               </div>
             </div>
           </div>
@@ -1525,6 +1549,9 @@ const TrainingReport = () => {
                     <SortTh label="Full Name" sortKey="name" sort={empSort.sort} onSort={empSort.toggle} align="left" wrap className={`${TH} text-left`} />
                     <SortTh label="UID No" sortKey="uid" sort={empSort.sort} onSort={empSort.toggle} align="left" wrap className={`${TH} text-left`} />
                     <SortTh label="Employee Ticket Number" sortKey="ticket" sort={empSort.sort} onSort={empSort.toggle} align="left" wrap className={`${TH} text-left`} />
+                    {/* Not in the training file — HR's employee code, read through
+                        the SE UID Master (Profile → SE UID tab). */}
+                    <SortTh label="E Code" sortKey="ecode" sort={empSort.sort} onSort={empSort.toggle} align="left" wrap className={`${TH} text-left`} />
                     <SortTh label="Occupation" sortKey="occupation" sort={empSort.sort} onSort={empSort.toggle} align="left" wrap className={`${TH} text-left`} />
                     <SortTh label="Current Status" sortKey="status" sort={empSort.sort} onSort={empSort.toggle} wrap className={`${TH} text-center`} />
                     <SortTh label="Skills" sortKey="skills" sort={empSort.sort} onSort={empSort.toggle} wrap className={`${TH} text-center`} />
@@ -1544,6 +1571,10 @@ const TrainingReport = () => {
                       <td className={`${TD} font-semibold text-gray-900`}>{mark(e.full_name, q)}</td>
                       <td className={`${TD} whitespace-nowrap`}>{mark(e.uid_no, q)}</td>
                       <td className={`${TD} whitespace-nowrap`}>{mark(e.employee_ticket_number, q)}</td>
+                      <td className={`${TD} whitespace-nowrap`}>
+                        {e.e_code ? mark(e.e_code, q)
+                          : <span className="text-gray-300" title="No E Code for this engineer in the SE UID Master">-</span>}
+                      </td>
                       <td className={TD}>{e.occupation || '-'}</td>
                       <td className={`${TD} text-center`}>
                         <StatusBadge value={e.current_status} manual={e.status_source === 'manual'} />

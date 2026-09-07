@@ -46,7 +46,7 @@ def get_db():
 
 
 @router.post("/upload")
-async def upload_tada_file(
+def upload_tada_file(
     file: UploadFile = File(...),
     branch_code: str = Query(..., description="Branch code"),
     uploaded_by: str = Query(..., description="Name of person uploading"),
@@ -152,7 +152,7 @@ async def upload_tada_file(
 
 
 @router.post("/validate")
-async def validate_tada_file(file: UploadFile = File(...)):
+def validate_tada_file(file: UploadFile = File(...)):
     """Validate file format without uploading"""
     if not file.filename.endswith(('.xlsx', '.xls')):
         return {"valid": False, "message": "Please upload an Excel file (.xlsx or .xls)"}

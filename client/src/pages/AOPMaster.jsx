@@ -591,8 +591,12 @@ const AOPMaster = () => {
       const wb = new ExcelJS.Workbook();
       const lastCol = 19;   // Branch + Person + 4×(3 months + Total) + FY Total
 
+      const SHEETS = {
+        spare: { tab: 'Spare Targets', title: 'Spare', unit: 'Lakh ₹' },
+        labour: { tab: 'Labour Targets', title: 'Labour', unit: 'Lakh ₹' },
+      };
       ['spare', 'labour'].forEach((metric) => {
-        const ws = wb.addWorksheet(metric === 'spare' ? 'Spare Targets' : 'Labour Targets', {
+        const ws = wb.addWorksheet(SHEETS[metric].tab, {
           pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
         });
         ws.columns = [{ width: 22 }, { width: 20 }, ...Array(16).fill({ width: 9 }), { width: 12 }];
@@ -609,7 +613,7 @@ const AOPMaster = () => {
         const right = { horizontal: 'right' };
 
         // Title band
-        put(1, 1, `AOP ${metric === 'spare' ? 'Spare' : 'Labour'} Target — FY ${fyLabel(fy)} (Lakh ₹)`,
+        put(1, 1, `AOP ${SHEETS[metric].title} Target — FY ${fyLabel(fy)} (${SHEETS[metric].unit})`,
           { font: { bold: true, size: 13, color: A('FFFFFF') }, fill: BRAND, align: center });
         for (let c = 2; c <= lastCol; c++) put(1, c, '', { fill: BRAND });
         ws.mergeCells(1, 1, 1, lastCol);
@@ -1799,12 +1803,17 @@ const AOPMaster = () => {
               </p>
             </div>
           ) : (
-            /* Spare and Labour grids as two stacked boxes — both always visible */
+            /* Spare and Labour grids as two stacked boxes — both always visible.
+               (The SR CLOSURE target of the report's third tile row is NOT set
+               here: it is the Service Load AOP tab's 'Service Request Closure
+               (Nos.)' table, the one place that closure target lives.) */
             <div className="p-3 space-y-3">
               {[
-                { metric: 'spare', name: 'Spare Target (Lakh ₹)', icon: TagIcon, gridRef: spareGridRef },
-                { metric: 'labour', name: 'Labour Target (Lakh ₹)', icon: WrenchScrewdriverIcon, gridRef: labourGridRef },
-              ].map(({ metric, name, icon: Icon, gridRef }) => (
+                { metric: 'spare', name: 'Spare Target (Lakh ₹)', icon: TagIcon,
+                  gridRef: spareGridRef, unit: 'Lakh', step: '0.01', total: 'Total (Lakh)' },
+                { metric: 'labour', name: 'Labour Target (Lakh ₹)', icon: WrenchScrewdriverIcon,
+                  gridRef: labourGridRef, unit: 'Lakh', step: '0.01', total: 'Total (Lakh)' },
+              ].map(({ metric, name, icon: Icon, gridRef, unit, step, total }) => (
                 <div key={metric} className="border border-gray-200 rounded-xl overflow-hidden">
                   <div className="px-2.5 py-1.5 text-[12px] font-bold text-white flex items-center gap-1.5"
                     style={{ backgroundColor: themeColor }}>
@@ -1884,11 +1893,11 @@ const AOPMaster = () => {
                               <React.Fragment key={q.label}>
                                 {q.keys.map((m) => (
                                   <td key={m} className={m === activeMonth ? tdCAct : tdC}>
-                                    <input type="number" min="0" step="0.01" value={r[metric]?.[m] ?? ''}
+                                    <input type="number" min="0" step={step} value={r[metric]?.[m] ?? ''}
                                       disabled={readOnly}
                                       onChange={(e) => setCell(idx, metric, m, e.target.value)}
                                       onFocus={(e) => e.target.select()}
-                                      title={`${monthLabel(m)} — enter in Lakh`}
+                                      title={`${monthLabel(m)} — enter in ${unit}`}
                                       className={`${m === activeMonth ? cellInputAct : cellInput} text-right`}
                                       style={{ '--tw-ring-color': themeColor }} />
                                   </td>
@@ -1906,7 +1915,7 @@ const AOPMaster = () => {
                       </tbody>
                       <tfoot>
                         <tr>
-                          <td className={`${stickyTd} font-semibold text-gray-700 bg-gray-50`} colSpan={1}>Total (Lakh)</td>
+                          <td className={`${stickyTd} font-semibold text-gray-700 bg-gray-50`} colSpan={1}>{total}</td>
                           <td className={`${tdC} bg-gray-50`} colSpan={1} />
                           {quarters.map((q) => (
                             <React.Fragment key={q.label}>
@@ -2021,6 +2030,7 @@ const AOPMaster = () => {
               })}
             </div>
           )}
+
         </div>
       )}
 

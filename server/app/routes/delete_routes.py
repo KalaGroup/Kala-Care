@@ -21,7 +21,7 @@ class DeleteRequest(BaseModel):
     dataTypes: Dict[str, bool]
 
 @router.post("/backup-data")
-async def backup_data(request: BackupRequest):
+def backup_data(request: BackupRequest):
     """Create backup of selected data type - Returns ZIP file containing Excel backups"""
     db = SessionLocal()
     try:        
@@ -45,7 +45,7 @@ async def backup_data(request: BackupRequest):
         db.close()
 
 @router.post("/delete-selected-data")
-async def delete_selected_data(request: DeleteRequest):
+def delete_selected_data(request: DeleteRequest):
     """Delete selected data types using TRUNCATE"""
     db = SessionLocal()
     try:        

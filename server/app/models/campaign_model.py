@@ -111,8 +111,30 @@ class CampaignLetterFormat(Base):
     # ]
     default_recipients = Column(JSON, default=[])
 
+    # The subject line of the letter. It used to BE the format type name, which
+    # meant renaming a format silently rewrote the subject of every letter sent
+    # from it — they are separate fields now. NULL on formats saved before the
+    # split, and the composer falls back to format_type_name for those.
+    subject = Column(Text, nullable=True)
+
     start_para = Column(Text, nullable=True)            # opening paragraph of the letter
     end_para = Column(Text, nullable=True)              # closing paragraph of the letter
+    # printed BELOW "Best regards / KALA Care Global LLP., / Authorized Signatory"
+    signature_para = Column(Text, nullable=True)
+
+    # Which parts the sender may still change in the Send Letter wizard.
+    # {"subject": true, "start_para": true, "end_para": true, "signature_para": true,
+    #  "customer_detail_fields": true, "engagement_detail_fields": true}
+    # A missing key reads as TRUE, so a format saved before this existed stays
+    # fully editable exactly as it was.
+    editable_fields = Column(JSON, default=dict)
+
+    # Does a letter of this format also carry the file mapped to the customer's
+    # engine model? The mapping itself lives in welcome_letter_model_rules — the
+    # master shared with the Welcome Letter — this flag only says whether THIS
+    # format uses it. Off by default: an existing format must not start sending
+    # a file it never sent before.
+    use_model_attachments = Column(Boolean, default=False)
 
     # CSP-only Service Cycle (KOEL preventive maintenance) defaults
     include_service_cycle = Column(Boolean, default=False)

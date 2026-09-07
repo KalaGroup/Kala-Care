@@ -4,6 +4,7 @@ import Swal from 'sweetalert2';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { canExportExcel } from '../utils/exportPermission';
+import { isPmsBranchScoped } from '../utils/pagePermission';
 import {
   ChartBarSquareIcon, ArrowUpTrayIcon, DocumentMagnifyingGlassIcon,
   XMarkIcon,
@@ -13,11 +14,26 @@ import {
 } from '@heroicons/react/24/outline';
 
 // ============================================================================
-// PMS → Sales and Labour Report  (Performance Management System)
-// Spare & Labour Sale — regional performance vs monthly targets.
+// PMS → Part & Labour Sale  (Performance Management System)
+// Renamed from "Sales and Labour Report" 2026-09-04 — the page KEY
+// ('sales_labour', stored in users.pms_pages) and the route
+// ('/sales-labour-report') deliberately keep their old names.
+// Regional performance vs monthly targets.
 //   ① Upload files (Part Sale + Labour Revenue Excel; dedupe on re-upload)
 //   ② Preview stored data   ③ Generate report / Print
 // Backend: server/app/routes/pms_routes.py (master admin only)
+//
+// BRANCH USERS: anyone who is not the Master Admin and does not carry the HO
+// branch sees ONLY their own branches. The server does the cutting (every
+// /pms endpoint here is scoped by _branch_scope), so the branch tables, their
+// totals, the summary tiles and the Region / Segment / SR-Type / Category
+// breakdowns are already branch-only by the time they arrive. The page then
+// drops what such a user has no use for: step ① (the upload boxes and Recent
+// uploads — those files are company-wide, so changing them is HO work and the
+// server refuses it outright), step ② (the uploaded-file preview and the
+// "Back to Data" button that returns to it) and the whole-FY report. Their
+// period picker reaches back three months, which the server does for them by
+// narrowing the data range /pms/data/summary reports.
 // ============================================================================
 
 const API = import.meta.env.VITE_BACKEND_URL;
@@ -220,8 +236,8 @@ const REPORT_TYPES = [
   { key: 'branch_wise', name: 'Branch-wise Report' },
   // ONE entry holding all three whole-year reports (FY, Quarterly, Month) —
   // each opens and closes inside it. They ignore the period picker, and the
-  // hint says so right in the dropdown.
-  { key: 'fy', name: 'Spares and Labour (FY / Quarterly / Month)' },
+  // hint says so right in the dropdown. Not offered to a branch user.
+  { key: 'fy', name: 'Spares and Labour (FY / Quarterly / Month)', hoOnly: true },
 ];
 const FY_TYPES = ['fy'];
 
@@ -540,6 +556,17 @@ const UploadBox = ({ label, recordType, onUploaded, onCheckFormat }) => {
 // ---------------------------------------------------------------------------
 
 const SalesLabourReport = () => {
+  // A user held to their own branches (not Master Admin, no HO branch). The
+  // server already sends them a branch-only payload over a three-month window
+  // — this only decides what the page bothers to render: no upload boxes, no
+  // Recent uploads, no uploaded-file preview, no "Back to Data", and no
+  // whole-FY report in the type dropdown. Read once: the session's branches do
+  // not change while the page is open.
+  const branchScoped = useMemo(() => isPmsBranchScoped(), []);
+  const reportTypes = useMemo(
+    () => (branchScoped ? REPORT_TYPES.filter((t) => !t.hoOnly) : REPORT_TYPES),
+    [branchScoped]);
+
   // stored-data summary + preview
   const [summary, setSummary] = useState(null);
   const [previewType, setPreviewType] = useState('part');
@@ -585,8 +612,9 @@ const SalesLabourReport = () => {
   const [branchDetail, setBranchDetail] = useState(null);
   const [branchDetailLoading, setBranchDetailLoading] = useState(false);
   // 'data' shows the Uploaded File Preview box; 'report' replaces it with the
-  // generated report (Back to Data returns).
-  const [view, setView] = useState('data');
+  // generated report (Back to Data returns). A branch user has no preview box
+  // to go back to, so they start — and stay — on the report.
+  const [view, setView] = useState(branchScoped ? 'report' : 'data');
   // Which file's expected-format panel is open ('part' | 'labour' | null)
   const [formatFor, setFormatFor] = useState(null);
   // Report Setup box collapse (bottom-edge arrow, like the sidebar's).
@@ -656,7 +684,10 @@ const SalesLabourReport = () => {
     [previewQuery, previewCancelFilter]);
 
   // First page (reset) — 200 rows; further pages appended by onPreviewScroll.
+  // The preview box is not on a branch user's page, so nothing is fetched for
+  // it (the endpoint would answer, scoped — there is just no table to fill).
   const loadPreview = useCallback(async (rt) => {
+    if (branchScoped) return;
     const reqId = ++previewReqRef.current;
     previewBusyRef.current = true;
     setPreviewLoading(true);
@@ -675,7 +706,7 @@ const SalesLabourReport = () => {
     finally {
       if (reqId === previewReqRef.current) { setPreviewLoading(false); previewBusyRef.current = false; }
     }
-  }, [previewUrl]);
+  }, [previewUrl, branchScoped]);
 
   // Lazy-load the next page when the preview table is scrolled near its end.
   const onPreviewScroll = useCallback(async (e) => {
@@ -737,13 +768,15 @@ const SalesLabourReport = () => {
     }
   };
 
+  // Recent uploads is HO-only — /pms/uploads 403s a branch user, so don't ask.
   const loadBatches = useCallback(async () => {
+    if (branchScoped) return;
     try {
       const res = await fetch(`${API}/pms/uploads`, { headers: authHeaders() });
       const data = await res.json();
       if (res.ok && data.success) setBatches(data.items || []);
     } catch { /* non-fatal */ }
-  }, []);
+  }, [branchScoped]);
 
   useEffect(() => { loadSummary(); loadBatches(); }, [loadSummary, loadBatches]);
 
@@ -1063,7 +1096,10 @@ const SalesLabourReport = () => {
         cur: elapsedWd > 0 ? at / elapsedWd : 0,
       };
     };
-    return { spare: calc(report.spare_rows), labour: calc(report.labour_rows) };
+    // sr_rows carry the same keys as the sales rows, so the same formula
+    // gives the SR run-rate — in SRs per day rather than rupees.
+    return { spare: calc(report.spare_rows), labour: calc(report.labour_rows),
+             sr: calc(report.sr_rows) };
   })() : null;
 
   // "All" view — Spare and Labour side by side in one frame, like the
@@ -1947,6 +1983,143 @@ const SalesLabourReport = () => {
     }
   };
 
+  // The period picker + the Generate button, shared by both layouts of the
+  // Report Setup box below: the roomy one Head Office gets under its upload
+  // boxes, and the single row a branch user gets (they have no files to upload
+  // and no preview to step through, so the period IS the whole box). The
+  // caller passes the layout classes.
+  const periodControls = (cls) => (
+    <div className={cls}>
+      <div className="relative flex-1 min-w-0"
+        onMouseEnter={() => dataRange.max && setShowRangePicker(true)}
+        onMouseLeave={() => { if (!fyOpen) setShowRangePicker(false); }}>
+        {/* The three FY reports cover the whole financial year, so
+          the period box is switched off while one is on screen. */}
+        <button onClick={() => { setFyOpen(false); setShowRangePicker(!showRangePicker); }}
+          disabled={!dataRange.max}
+          title={fyReport ? 'The FY button inside picks the year these reports show' : undefined}
+          className="w-full flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white shadow-md hover:opacity-90 disabled:opacity-50 transition-all"
+          style={{ backgroundColor: themeColor }}>
+          <CalendarDaysIcon className="h-3.5 w-3.5 flex-shrink-0" />
+          <span className="truncate">{periodLabel()}</span>
+          <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${showRangePicker ? 'rotate-180' : ''}`} />
+        </button>
+
+        {showRangePicker && (
+          /* pt-2 (not a margin) keeps the hover unbroken across the gap */
+          <div className="absolute z-50 left-0 right-0 sm:left-auto sm:right-0 top-full pt-2">
+            <div className="sm:w-[460px] max-w-[92vw] bg-white rounded-xl shadow-xl border border-gray-200">
+              <div className="p-3 max-h-[75vh] overflow-y-auto">
+                <div className="flex flex-col sm:flex-row gap-4">
+                  {/* LEFT: Financial Year on top, then its 12 months
+                      (Apr → Mar). Clicking a month applies it as the
+                      period; months with no uploaded data are disabled. */}
+                  <div className="sm:w-[44%]">
+                    <h3 className="text-xs font-semibold text-gray-800 mb-1 text-center">Select Month</h3>
+                    {/* The window is not computed here: the server
+                      reports a branch user's data range as the last
+                      three months, so the grid greys out the rest on
+                      its own. This just says why. */}
+                    {branchScoped && (
+                      <p className="mb-2 text-[10px] text-gray-500 text-center leading-tight">
+                        Last 3 months only
+                      </p>
+                    )}
+                    <div className="relative mb-2">
+                      {/* The year list opens ABOVE the button and in FLOW, not
+                          absolutely positioned: the panel is its own scroll box,
+                          so a floating list gets clipped by it. */}
+                      {fyOpen && (
+                        <div className="mb-1 max-h-36 overflow-y-auto bg-white border border-gray-200 rounded-lg">
+                          {fyChoices.map((y) => (
+                            <button key={y} type="button"
+                              onClick={() => { setFyOpen(false); setQuickFy(y); }}
+                              className={`block w-full px-2 py-1.5 text-xs text-center hover:bg-gray-100 ${y === shownFy ? 'font-semibold text-white' : 'text-gray-700'}`}
+                              style={y === shownFy ? { backgroundColor: themeColor } : {}}>
+                              FY {y}–{String(y + 1).slice(2)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <button type="button" onClick={() => setFyOpen((v) => !v)}
+                        className="w-full relative pl-2 pr-6 py-1.5 rounded-lg text-xs font-semibold text-white text-center transition-all hover:opacity-90"
+                        style={{ backgroundColor: themeColor }}>
+                        FY {shownFy}–{String(shownFy + 1).slice(2)}
+                        <ChevronDownIcon className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-white transition-transform ${fyOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {fyMonths.map((m) => (
+                        <button key={m.start} type="button" disabled={!m.inData}
+                          onClick={() => applyMonth(new Date(m.y, m.mi, 1))}
+                          title={`${m.label} ${m.y}`}
+                          className={`px-1 py-1.5 rounded-lg text-xs font-medium transition-all text-center ${m.selected
+                            ? 'text-white'
+                            : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gray-50'}`}
+                          style={m.selected ? { backgroundColor: themeColor } : {}}>
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* RIGHT: the picked month's dates. Clicking a month on the
+                      left takes the WHOLE month; clicking two dates here
+                      narrows the period to a range inside that month. */}
+                  <div className="sm:w-[56%]">
+                    <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">
+                      {calMonth ? calMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : 'Dates'}
+                    </h3>
+                    <div className="border border-gray-200 rounded-lg p-1 bg-gray-50/50 flex justify-center">
+                      <DatePicker
+                        /* remount on month change so the grid jumps to it */
+                        key={calMonth ? `${calMonth.getFullYear()}-${calMonth.getMonth()}` : 'none'}
+                        openToDate={calMonth || undefined}
+                        selected={dayRange[0]}
+                        startDate={dayRange[0] || (fromDate ? new Date(fromDate + 'T00:00:00') : null)}
+                        endDate={dayRange[1] || (dayRange[0] ? null : (toDate ? new Date(toDate + 'T00:00:00') : null))}
+                        selectsRange
+                        onChange={applyDayRange}
+                        inline
+                        disabledKeyboardNavigation
+                        minDate={calBounds.min}
+                        maxDate={calBounds.max}
+                        calendarClassName="custom-calendar"
+                        dateFormat="dd/MM/yyyy"
+                      />
+                    </div>
+                    <div className="mt-2 flex items-center justify-center gap-2">
+                      <p className="text-[11px] text-gray-600">
+                        Period:{' '}
+                        <b>{fromDate && toDate ? `${fmtDayYr(fromDate)} → ${fmtDayYr(toDate)}` : '—'}</b>
+                      </p>
+                      {activePeriod === 'range' && calMonth && (
+                        <button type="button"
+                          onClick={() => applyMonth(calMonth)}
+                          className="px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">
+                          Whole month
+                        </button>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[10px] text-gray-400 text-center">
+                      Click two dates for a range inside this month
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <button onClick={() => generate()} disabled={generating || !dataRange.max || fyReport}
+        title={fyReport ? 'This report always covers the current financial year' : undefined}
+        className="flex-shrink-0 flex items-center gap-1 px-4 py-1.5 text-xs font-semibold text-white rounded-full shadow-md hover:opacity-90 disabled:opacity-50"
+        style={{ backgroundColor: themeColor }}>
+        {generating ? 'Generating…' : 'Generate →'}
+      </button>
+    </div>
+  );
+
   return (
     <div className="min-h-screen font-sans">
       <div className="max-w-7xl mx-auto px-3 sm:px-5 pb-0 max-md:px-2">
@@ -2021,9 +2194,9 @@ const SalesLabourReport = () => {
                 <ChartBarSquareIcon className="h-5 w-5" />
               </div>
               <div>
-                <h1 className="text-lg sm:text-xl font-bold leading-tight">Performance Management System</h1>
+                <h1 className="text-lg sm:text-xl font-bold leading-tight">Part &amp; Labour Sale</h1>
                 <p className="text-[11px] text-white/70 leading-tight">
-                  Spare &amp; Labour Sale — regional performance vs monthly targets
+                  Performance Management System — regional performance vs monthly targets
                 </p>
               </div>
             </div>
@@ -2038,8 +2211,37 @@ const SalesLabourReport = () => {
           </div>
         </div>
 
-        {/* ============ ① Report Setup ============ */}
+        {/* ============ ① Report Setup ============
+          Two layouts. A branch user has no files to upload and no preview to
+          step through, so their whole box is ONE row — what data they have,
+          the period, Generate — with nothing to collapse. Head Office keeps
+          the full three-step box below it. */}
         <div className="pms-no-print relative bg-white rounded-2xl border border-gray-200 mb-3">
+          {branchScoped ? (
+            <div className="px-4 py-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <CalendarDaysIcon className="h-4 w-4 pms-accent flex-shrink-0" />
+              <h2 className="text-sm font-semibold text-gray-900">Report Setup</h2>
+              {/* The two data lines of the roomy layout, squeezed onto this one
+                — the per-file dates live in the tooltip. */}
+              {dataRange.max ? (
+                <span className="text-[11px] text-gray-500 max-md:w-full"
+                  title={[
+                    summary?.part?.rows > 0
+                      && `Part sale: ${inr(summary.part.rows)} rows (${fmtDay(summary.part.from_date)} → ${fmtDay(summary.part.to_date)})`,
+                    summary?.labour?.rows > 0
+                      && `Labour: ${inr(summary.labour.rows)} rows (${fmtDay(summary.labour.from_date)} → ${fmtDay(summary.labour.to_date)})`,
+                  ].filter(Boolean).join(String.fromCharCode(10))}>
+                  Part <b>{inr(summary?.part?.rows || 0)}</b> · Labour <b>{inr(summary?.labour?.rows || 0)}</b> rows
+                  <span className="text-gray-400"> · </span>
+                  {fmtDay(dataRange.min)} → {fmtDay(dataRange.max)}
+                </span>
+              ) : summary && (
+                <span className="text-[11px] text-gray-500">No data for your branch yet.</span>
+              )}
+              {periodControls('ml-auto flex items-center gap-2 min-w-[320px] max-md:w-full max-md:min-w-0')}
+            </div>
+          ) : (
+          <>
           <div className={`px-4 py-2.5 flex flex-wrap items-center gap-2 ${setupOpen ? 'border-b border-gray-100' : ''}`}>
             <ArrowUpTrayIcon className="h-4 w-4 pms-accent" />
             <h2 className="text-sm font-semibold text-gray-900">Report Setup</h2>
@@ -2057,6 +2259,9 @@ const SalesLabourReport = () => {
             onTransitionEnd={() => { if (setupOpen) setSetupSettled(true); }}>
             <div className={`min-h-0 ${setupOpen && setupSettled ? 'overflow-visible' : 'overflow-hidden'}`}>
               <div className="p-3 flex flex-wrap gap-3">
+                {/* Uploading replaces the data EVERY branch reports on, so it
+                  stays with Head Office — this whole layout is HO-only, and
+                  the server refuses the endpoints for anyone else. */}
                 <UploadBox label="Part Sale file" recordType="part" onUploaded={onUploaded}
                   onCheckFormat={(l) => setFormatFor((cur) => (cur === l ? null : l))} />
                 <UploadBox label="Labour Revenue file" recordType="labour" onUploaded={onUploaded}
@@ -2077,129 +2282,7 @@ const SalesLabourReport = () => {
                     )}
                     {summary && !dataRange.max && <div>No data uploaded yet — upload a file first.</div>}
                   </div>
-                  {/* Period picker + Generate — one row. The period is MONTH-WISE
-                only (no presets / free date ranges). The picker opens on hover
-                and closes when the mouse leaves (click still toggles). */}
-                  <div className="mt-2 flex items-center gap-2">
-                    <div className="relative flex-1 min-w-0"
-                      onMouseEnter={() => dataRange.max && setShowRangePicker(true)}
-                      onMouseLeave={() => { if (!fyOpen) setShowRangePicker(false); }}>
-                      {/* The three FY reports cover the whole financial year, so
-                        the period box is switched off while one is on screen. */}
-                      <button onClick={() => { setFyOpen(false); setShowRangePicker(!showRangePicker); }}
-                        disabled={!dataRange.max}
-                        title={fyReport ? 'The FY button inside picks the year these reports show' : undefined}
-                        className="w-full flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-white shadow-md hover:opacity-90 disabled:opacity-50 transition-all"
-                        style={{ backgroundColor: themeColor }}>
-                        <CalendarDaysIcon className="h-3.5 w-3.5 flex-shrink-0" />
-                        <span className="truncate">{periodLabel()}</span>
-                        <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${showRangePicker ? 'rotate-180' : ''}`} />
-                      </button>
-
-                      {showRangePicker && (
-                        /* pt-2 (not a margin) keeps the hover unbroken across the gap */
-                        <div className="absolute z-50 left-0 right-0 sm:left-auto sm:right-0 top-full pt-2">
-                          <div className="sm:w-[460px] max-w-[92vw] bg-white rounded-xl shadow-xl border border-gray-200">
-                            <div className="p-3 max-h-[75vh] overflow-y-auto">
-                              <div className="flex flex-col sm:flex-row gap-4">
-                                {/* LEFT: Financial Year on top, then its 12 months
-                                    (Apr → Mar). Clicking a month applies it as the
-                                    period; months with no uploaded data are disabled. */}
-                                <div className="sm:w-[44%]">
-                                  <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">Select Month</h3>
-                                  <div className="relative mb-2">
-                                    {/* The year list opens ABOVE the button and in FLOW, not
-                                        absolutely positioned: the panel is its own scroll box,
-                                        so a floating list gets clipped by it. */}
-                                    {fyOpen && (
-                                      <div className="mb-1 max-h-36 overflow-y-auto bg-white border border-gray-200 rounded-lg">
-                                        {fyChoices.map((y) => (
-                                          <button key={y} type="button"
-                                            onClick={() => { setFyOpen(false); setQuickFy(y); }}
-                                            className={`block w-full px-2 py-1.5 text-xs text-center hover:bg-gray-100 ${y === shownFy ? 'font-semibold text-white' : 'text-gray-700'}`}
-                                            style={y === shownFy ? { backgroundColor: themeColor } : {}}>
-                                            FY {y}–{String(y + 1).slice(2)}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                    <button type="button" onClick={() => setFyOpen((v) => !v)}
-                                      className="w-full relative pl-2 pr-6 py-1.5 rounded-lg text-xs font-semibold text-white text-center transition-all hover:opacity-90"
-                                      style={{ backgroundColor: themeColor }}>
-                                      FY {shownFy}–{String(shownFy + 1).slice(2)}
-                                      <ChevronDownIcon className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-white transition-transform ${fyOpen ? 'rotate-180' : ''}`} />
-                                    </button>
-                                  </div>
-                                  <div className="grid grid-cols-3 gap-1.5">
-                                    {fyMonths.map((m) => (
-                                      <button key={m.start} type="button" disabled={!m.inData}
-                                        onClick={() => applyMonth(new Date(m.y, m.mi, 1))}
-                                        title={`${m.label} ${m.y}`}
-                                        className={`px-1 py-1.5 rounded-lg text-xs font-medium transition-all text-center ${m.selected
-                                          ? 'text-white'
-                                          : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gray-50'}`}
-                                        style={m.selected ? { backgroundColor: themeColor } : {}}>
-                                        {m.label}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-
-                                {/* RIGHT: the picked month's dates. Clicking a month on the
-                                    left takes the WHOLE month; clicking two dates here
-                                    narrows the period to a range inside that month. */}
-                                <div className="sm:w-[56%]">
-                                  <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">
-                                    {calMonth ? calMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : 'Dates'}
-                                  </h3>
-                                  <div className="border border-gray-200 rounded-lg p-1 bg-gray-50/50 flex justify-center">
-                                    <DatePicker
-                                      /* remount on month change so the grid jumps to it */
-                                      key={calMonth ? `${calMonth.getFullYear()}-${calMonth.getMonth()}` : 'none'}
-                                      openToDate={calMonth || undefined}
-                                      selected={dayRange[0]}
-                                      startDate={dayRange[0] || (fromDate ? new Date(fromDate + 'T00:00:00') : null)}
-                                      endDate={dayRange[1] || (dayRange[0] ? null : (toDate ? new Date(toDate + 'T00:00:00') : null))}
-                                      selectsRange
-                                      onChange={applyDayRange}
-                                      inline
-                                      disabledKeyboardNavigation
-                                      minDate={calBounds.min}
-                                      maxDate={calBounds.max}
-                                      calendarClassName="custom-calendar"
-                                      dateFormat="dd/MM/yyyy"
-                                    />
-                                  </div>
-                                  <div className="mt-2 flex items-center justify-center gap-2">
-                                    <p className="text-[11px] text-gray-600">
-                                      Period:{' '}
-                                      <b>{fromDate && toDate ? `${fmtDayYr(fromDate)} → ${fmtDayYr(toDate)}` : '—'}</b>
-                                    </p>
-                                    {activePeriod === 'range' && calMonth && (
-                                      <button type="button"
-                                        onClick={() => applyMonth(calMonth)}
-                                        className="px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">
-                                        Whole month
-                                      </button>
-                                    )}
-                                  </div>
-                                  <p className="mt-1 text-[10px] text-gray-400 text-center">
-                                    Click two dates for a range inside this month
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <button onClick={() => generate()} disabled={generating || !dataRange.max || fyReport}
-                      title={fyReport ? 'This report always covers the current financial year' : undefined}
-                      className="flex-shrink-0 flex items-center gap-1 px-4 py-1.5 text-xs font-semibold text-white rounded-full shadow-md hover:opacity-90 disabled:opacity-50"
-                      style={{ backgroundColor: themeColor }}>
-                      {generating ? 'Generating…' : 'Generate →'}
-                    </button>
-                  </div>
+                  {periodControls('mt-2 flex items-center gap-2')}
                 </div>
               </div>
 
@@ -2291,10 +2374,13 @@ const SalesLabourReport = () => {
               ? <ChevronDoubleUpIcon className="h-3 w-3" />
               : <ChevronDoubleDownIcon className="h-3 w-3" />}
           </button>
+          </>
+          )}
         </div>
 
-        {/* ============ ② Uploaded data preview (hidden while viewing report) ============ */}
-        {view === 'data' && (
+        {/* ============ ② Uploaded data preview (hidden while viewing report,
+            and never shown at all to a branch user) ============ */}
+        {!branchScoped && view === 'data' && (
           <div className="pms-no-print bg-white rounded-2xl border border-gray-200 mb-3 overflow-hidden">
             <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2">
               <TableCellsIcon className="h-4 w-4 pms-accent" />
@@ -2430,10 +2516,13 @@ const SalesLabourReport = () => {
         {view === 'report' && report && (
           <div className="pms-print-area bg-white rounded-2xl border border-gray-200 mb-3 overflow-visible">
             <div className="px-4 py-2.5 border-b border-gray-100 flex flex-wrap items-center gap-2">
-              <button onClick={() => setView('data')}
-                className="pms-no-print flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
-                ← Back to Data
-              </button>
+              {/* A branch user has no preview box to go back to */}
+              {!branchScoped && (
+                <button onClick={() => setView('data')}
+                  className="pms-no-print flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">
+                  ← Back to Data
+                </button>
+              )}
               <DocumentMagnifyingGlassIcon className="h-4 w-4 pms-no-print pms-accent" />
               <h2 className="text-sm font-semibold text-gray-900">
                 Generated Report : As on {fmtFull(report.as_on)}
@@ -2460,25 +2549,40 @@ const SalesLabourReport = () => {
             {/* Summary tiles — Spare / Labour % vs the AOP Master target get
               their own boxes */}
             <div className="p-2 space-y-1.5">
-              {['spare', 'labour'].map((ty) => {
+              {/* Three rows, one per measure. The third is SR CLOSURES from the
+                EFSR file: same six tiles, but COUNTS rather than rupees, so
+                "Total ... Sale" reads "Total SR Closed" and the invoice count
+                becomes the SRs allocated to engineers in the period. Its target
+                is set in AOP & Master → SR Type Master (Sales and Labour). */}
+              {['spare', 'labour', 'sr'].map((ty) => {
                 const sm = report.summary;
-                const isSp = ty === 'spare';
-                const nm = isSp ? 'Spare' : 'Labour';
-                const sale = isSp ? sm.total_spare_sale : sm.total_labour_sale;
-                const target = isSp ? sm.total_spare_target : sm.total_labour_target;
-                const inv = ((isSp ? report.spare_rows : report.labour_rows) || [])
-                  .reduce((a, r) => a + (r.invoice_count_till || 0), 0);
+                const isSr = ty === 'sr';
+                const nm = ty === 'spare' ? 'Spare' : ty === 'labour' ? 'Labour' : 'SR';
+                const rows = ty === 'spare' ? report.spare_rows
+                  : ty === 'labour' ? report.labour_rows : report.sr_rows;
+                const done = isSr ? (sm.total_sr_closed || 0)
+                  : ty === 'spare' ? sm.total_spare_sale : sm.total_labour_sale;
+                const target = isSr ? (sm.total_sr_target || 0)
+                  : ty === 'spare' ? sm.total_spare_target : sm.total_labour_target;
+                const cnt = (rows || []).reduce((a, r) => a + (r.invoice_count_till || 0), 0);
                 const rr = runRateBy?.[ty];
+                // Lakh rupees for the two sales rows, plain counts for the SR one
+                const amt = (v) => (isSr ? inr(Math.round(v)) : '₹ ' + lakh(v));
+                const rate = (v) => (isSr ? Number(v).toFixed(1) + ' /day'
+                  : '₹ ' + lakh(v) + ' /day');
+                // An older server sends no sr_rows at all — then there is no
+                // third row to draw rather than a row of dashes.
+                if (isSr && !report.sr_rows) return null;
                 return (
                   <div key={ty} className="grid grid-cols-6 max-xl:grid-cols-3 max-md:grid-cols-2 gap-1.5">
                     {[
-                      [`${nm} Target`, target ? '₹ ' + lakh(target) : '— (no target)', null],
-                      [`Total ${nm} Sale`, '₹ ' + lakh(sale), null],
+                      [`${nm} Target`, target ? amt(target) : '— (no target)', null],
+                      [isSr ? 'Total SR Closed' : `Total ${nm} Sale`, amt(done), null],
                       [`${nm} % vs AOP Target`, target
-                        ? (sale / target * 100).toFixed(1) + ' %' : '— (no target)', null],
-                      [`${nm} Invoices`, inr(inv), null],
-                      [`Current ${nm} Run-Rate`, rr ? '₹ ' + lakh(rr.cur) + ' /day' : '-', null],
-                      [`Required ${nm} Run-Rate`, rr ? '₹ ' + lakh(rr.req) + ' /day' : '-', null],
+                        ? (done / target * 100).toFixed(1) + ' %' : '— (no target)', null],
+                      [isSr ? 'SR Allocated' : `${nm} Invoices`, inr(cnt), null],
+                      [`Current ${nm} Run-Rate`, rr ? rate(rr.cur) : '-', null],
+                      [`Required ${nm} Run-Rate`, rr ? rate(rr.req) : '-', null],
                     ].map(([label, value, sub]) => (
                       <div key={label} className="border border-gray-200 rounded-lg px-2 py-2 min-w-0">
                         <p className="text-[11px] text-gray-500 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={label}>{label}</p>
@@ -2496,7 +2600,7 @@ const SalesLabourReport = () => {
               <div className="flex flex-col">
                 <label className="text-[10px] font-medium text-gray-500 mb-0.5">Select report type</label>
                 <HoverSelect value={reportType} onChange={setReportType}
-                  options={REPORT_TYPES.map((t) => ({ value: t.key, label: t.name, hint: t.hint }))} />
+                  options={reportTypes.map((t) => ({ value: t.key, label: t.name, hint: t.hint }))} />
               </div>
               {/* These three cover a WHOLE financial year — the one already
                 chosen in the period box above (its FY button), so there is no
@@ -2944,13 +3048,19 @@ const SalesLabourReport = () => {
                   cur: elapsedWd > 0 ? (r.achieved_till || 0) / elapsedWd : 0,
                 };
               };
+              // The SR CLOSURE block (EFSR file) reads its figures out of
+              // sr_rows, which carry the same keys - so rrOf() gives its
+              // run-rate too, in SRs/day instead of rupees.
+              const hasSr = !!report.sr_rows;
               const rowsB = selBranches.map((id) => {
                 const sp = (report.spare_rows || []).find((r) => r.branch_id === id);
                 const lb = (report.labour_rows || []).find((r) => r.branch_id === id);
+                const sr = (report.sr_rows || []).find((r) => r.branch_id === id);
                 const base = sp || lb;
                 if (!base) return null;
                 const spSale = sp?.achieved_till || 0, spTgt = sp?.monthly_target || 0;
                 const lbSale = lb?.achieved_till || 0, lbTgt = lb?.monthly_target || 0;
+                const srDone = sr?.achieved_till || 0, srTgt = sr?.monthly_target || 0;
                 return {
                   id, rank: rankOf(id), rankOutOf: ranked.length,
                   name: base.branch_name, region: base.region, person: base.responsible_person,
@@ -2958,6 +3068,8 @@ const SalesLabourReport = () => {
                   lbSale, lbTgt, lbPct: lbTgt ? lbSale / lbTgt * 100 : null,
                   spInv: sp?.invoice_count_till || 0, lbInv: lb?.invoice_count_till || 0,
                   spRR: rrOf(sp), lbRR: rrOf(lb),
+                  srDone, srTgt, srPct: srTgt ? srDone / srTgt * 100 : null,
+                  srAlloc: sr?.invoice_count_till || 0, srRR: rrOf(sr),
                 };
               }).filter(Boolean);
               // Compact header / cell padding for the wide 14-column table
@@ -2992,13 +3104,13 @@ const SalesLabourReport = () => {
                     title wraps onto extra header lines ("vs AOP / Target %")
                     instead of stretching its column. */}
                   <HScrollBox watch={`analysis-${rowsB.length}`}>
-                    <table className="w-full text-[11px] border-collapse min-w-[820px]"
+                    <table className={`w-full text-[11px] border-collapse ${hasSr ? 'min-w-[1180px]' : 'min-w-[820px]'}`}
                       style={{ tableLayout: 'fixed' }}>
                       <colgroup>
                         <col style={{ width: '10%' }} />
                         <col style={{ width: '6%' }} />
-                        {Array.from({ length: 12 }, (_, ci) => (
-                          <col key={ci} style={{ width: `${84 / 12}%` }} />
+                        {Array.from({ length: hasSr ? 18 : 12 }, (_, ci) => (
+                          <col key={ci} style={{ width: `${84 / (hasSr ? 18 : 12)}%` }} />
                         ))}
                       </colgroup>
                       <thead>
@@ -3007,6 +3119,10 @@ const SalesLabourReport = () => {
                           <th className={thBA} rowSpan={2}>Rank</th>
                           <th className={thBA} colSpan={6}>SPARE</th>
                           <th className={thBA} colSpan={6}>LABOUR</th>
+                          {/* SR closures are COUNTS - the box title's "Values in
+                            Lakh" does not apply to this block, so its own
+                            header says so. */}
+                          {hasSr && <th className={thBA} colSpan={6}>SR CLOSURE (Nos.)</th>}
                         </tr>
                         <tr>
                           {[['Target', null, 'A'], ['Total Sale', null, 'B'],
@@ -3014,7 +3130,12 @@ const SalesLabourReport = () => {
                             ['Invoice Count'], ['Current Run-Rate /day'], ['Required Run-Rate /day'],
                             ['Target', null, 'C'], ['Total Sale', null, 'D'],
                             ['vs AOP Target %', 'D / C × 100'],
-                            ['Invoice Count'], ['Current Run-Rate /day'], ['Required Run-Rate /day']]
+                            ['Invoice Count'], ['Current Run-Rate /day'], ['Required Run-Rate /day'],
+                            ...(hasSr ? [
+                              ['Target', null, 'E'], ['SR Closed', null, 'F'],
+                              ['vs AOP Target %', 'F / E × 100'],
+                              ['SR Allocated'], ['Current Run-Rate /day'], ['Required Run-Rate /day'],
+                            ] : [])]
                             .map(([h, f, tag], i) => (
                               <th key={i} className={thBA}>
                                 {f ? pctHead(h, f) : tag ? colTag(h, tag) : h}
@@ -3024,6 +3145,25 @@ const SalesLabourReport = () => {
                       </thead>
                       <tbody>
                         {rowsB.map((b) => {
+                          // SR closures are counts, so this block prints whole
+                          // numbers (and a run-rate to one decimal) instead of
+                          // the lakh figures the two sales blocks use.
+                          const srHalf = (b) => (
+                            <>
+                              <td className={`${tdBA} text-right`}>{inrT(b.srTgt)}</td>
+                              <td className={`${tdBA} text-right`}>{inrT(b.srDone)}</td>
+                              <td className={`${tdBA} text-right font-semibold ${pctCellCls(b.srPct)}`}>
+                                {!b.srPct ? '-' : b.srPct.toFixed(1)}
+                              </td>
+                              <td className={`${tdBA} text-center`}>{inrT(b.srAlloc)}</td>
+                              <td className={`${tdBA} text-right`}>
+                                {b.srRR ? b.srRR.cur.toFixed(1) : '-'}
+                              </td>
+                              <td className={`${tdBA} text-right`}>
+                                {b.srRR ? b.srRR.req.toFixed(1) : '-'}
+                              </td>
+                            </>
+                          );
                           const half = (tgt, sale, pct, inv, rr) => (
                             <>
                               {/* box title says "Values in Lakh ₹" — bare
@@ -3051,6 +3191,7 @@ const SalesLabourReport = () => {
                               </td>
                               {half(b.spTgt, b.spSale, b.spPct, b.spInv, b.spRR)}
                               {half(b.lbTgt, b.lbSale, b.lbPct, b.lbInv, b.lbRR)}
+                              {hasSr && srHalf(b)}
                             </tr>
                           );
                         })}

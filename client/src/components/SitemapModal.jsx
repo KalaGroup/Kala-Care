@@ -197,7 +197,7 @@ const SITEMAP = [
         ],
     },
     {
-        title: 'PMS — Sales & Labour Report', path: '/sales-labour-report', color: '#0d9488',
+        title: 'PMS — Part & Labour Sale', path: '/sales-labour-report', color: '#0d9488',
         desc: 'Spare & Labour sale against the monthly targets, region by region.',
         features: [
             { label: 'All (Spare + Labour)' },

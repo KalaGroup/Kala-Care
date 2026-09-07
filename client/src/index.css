@@ -2167,6 +2167,29 @@ html.dark .focus\:ring-indigo-100:focus { --tw-ring-color: rgba(56, 189, 248, 0.
 html.dark .border-red-100 { border-color: rgba(239, 68, 68, 0.3) !important; }
 html.dark .hover\:border-red-300:hover { border-color: rgba(239, 68, 68, 0.5) !important; }
 
+/* ============================================================
+   SE UID MASTER (Profile -> SE UID) -- the engineer pop-up.
+
+   Everything in that dialog was already caught by the nets above
+   EXCEPT the opacity-suffixed variants: Tailwind emits
+   `.text-indigo-700\/80` as its own class, and a remap of the
+   plain `.text-indigo-700` does not reach it. So the pop-up came
+   up dark with light-theme detail sitting on it -- burnt-orange
+   labels over the HR box, indigo-700 labels (a dark blue-violet)
+   on the status panel where nothing could be read, and, brightest
+   of all, an almost-white lavender rule and input borders.
+   Each variant needs its own entry; see the /70 group above.
+   ============================================================ */
+html.dark .text-amber-700\/80 { color: rgba(250, 204, 21, 0.82) !important; }
+html.dark .text-indigo-700\/80 { color: rgba(56, 189, 248, 0.82) !important; }
+/* the rule over 'Ticket No.' and the Status / Last working day /
+   Reason field borders -- indigo-200 and -300 are near-white, and
+   at full strength they out-shouted the values they enclose */
+html.dark .border-indigo-200\/70 { border-color: rgba(56, 189, 248, 0.28) !important; }
+html.dark .border-indigo-300 { border-color: rgba(56, 189, 248, 0.42) !important; }
+/* Remove, on hover, in the pop-up's footer */
+html.dark .hover\:bg-red-100:hover { background-color: rgba(239, 68, 68, 0.22) !important; }
+
 /* ---- Scrollbars. Both pages declare `scrollbar-color` in their own
         <style> block; once that property is set Chrome renders the
         standard scrollbar and ignores ::-webkit-scrollbar-*, so the
@@ -2252,3 +2275,41 @@ html.dark .pms-seg {
   box-shadow: inset 0 0 0 1px #2e3440;
 }
 html.dark .pms-seg > .pms-seg-on { background-color: #2b313d !important; }
+
+/* ============================================================
+   Letter paragraph boxes (LetterParaEditor) and the letter
+   previews that show the same markup.
+
+   Tailwind's preflight zeroes `list-style` and the list padding,
+   so a WYSIWYG bullet list would render as plain lines without
+   this — `revert` hands the browser default back.
+   ============================================================ */
+/* `list-style: revert` alone leaves the POSITION up to the browser, and the
+   letter sets it inline as `outside`. State it here too, or a bullet that
+   wraps hangs correctly in the letter and not in the box the author typed it
+   in. `outside` is what puts the wrapped words under the TEXT rather than back
+   under the bullet. */
+.letter-rich ul,
+.letter-rich ol {
+    margin: 4px 0;
+    padding-left: 22px;
+    list-style: revert;
+    list-style-position: outside;
+}
+.letter-rich ul { list-style-type: disc; }
+.letter-rich ol { list-style-type: decimal; }
+.letter-rich li { margin: 0 0 3px; }
+/* a soft break inside a bullet (Shift+Enter) lines up with the text above it */
+.letter-rich li > br { line-height: inherit; }
+/* Direct children only, so the gap the Gap control sets is the gap the letter
+   prints — a nested container must not add one of its own. */
+.letter-rich > p,
+.letter-rich > div { margin: 0 0 9px; }
+.letter-rich p { margin: 0 0 9px; }
+/* 600, not 700: at letter body size a full bold reads as a heavy blob.
+   Must match BOLD_STYLE in utils/letterRichText.js, which stamps the same
+   weight inline for the emailed letter. */
+.letter-rich b, .letter-rich strong { font-weight: 600; }
+.letter-rich i, .letter-rich em { font-style: italic; }
+.letter-rich u { text-decoration: underline; }
+.letter-rich:focus { outline: none; box-shadow: 0 0 0 2px rgba(47, 49, 146, 0.18); }

@@ -42,7 +42,7 @@ AOP_RIGHTS_ADMIN_IDS = {
 # endpoint passes to _require_pms_page in app/routes/pms_routes.py.
 # AOP & Master is deliberately NOT here — it has its own aop_access / aop_tabs.
 PMS_PAGE_KEYS = (
-    "sales_labour",           # Sales & Labour Report (and its file uploads)
+    "sales_labour",           # Part & Labour Sale (and its file uploads) — key kept
     "employee_productivity",  # Employee Productivity
     "sr_allocation",          # SR Allocation Report
     "se_performance",         # SE Performance (Annexure I commitment matrix)
@@ -137,6 +137,55 @@ def can_open_annual_tab(user: User, tab: str = None) -> bool:
     if tab is None:
         return len(tabs) > 0
     return tab in tabs
+
+
+# ---- Data Upload page (Engagement Masters) --------------------------------
+# The Master Admin always has it. A branch admin / employee needs
+# users.can_access_import, and users.import_files then says WHICH of the
+# Data Upload page's files they may upload — the canonical file-type names
+# live in FILE_TYPES (app/routes/import_routes.py); keep IMPORT_FILE_TYPES in
+# client/src/utils/pagePermission.js in step with that list.
+
+def _import_file_types():
+    """The Data Upload page's file-type registry. Imported lazily — routes
+    import this controller, so a module-level import would be circular."""
+    from app.routes.import_routes import FILE_TYPES
+    return FILE_TYPES
+
+
+def import_files_list(user: User):
+    """users.import_files as a clean list of file-type names, or None.
+
+    None means NO per-file restriction was ever set (the column is NULL, or its
+    contents are unreadable) — then the access flag opens every file. An empty
+    list is the opposite: no file was ticked, so nothing may be uploaded."""
+    raw = getattr(user, "import_files", None)
+    if raw is None or raw == "":
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, list):
+        return None
+    allowed = _import_file_types()
+    return [f for f in allowed if f in data]           # registry order, deduped
+
+
+def can_upload_import_file(user: User, file_type: str = None) -> bool:
+    """May this user upload one Data Upload file? file_type=None asks about
+    the page as a whole (any file at all)."""
+    role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    if role == UserRole.MASTER_ADMIN.value:
+        return True                       # the Master Admin is never scoped
+    if not bool(getattr(user, "can_access_import", False)):
+        return False
+    files = import_files_list(user)
+    if files is None:
+        return True                       # no per-file list = every file
+    if file_type is None:
+        return len(files) > 0
+    return file_type in files
 
 
 # The tabs of the AOP & Master page, in the order they appear there. Rights are
@@ -728,10 +777,12 @@ class UserController:
                 detail="Only Master Admin can change page access"
             )
 
-        if page not in ("part_detail", "mom", "approval", "pms"):
+        if page not in ("part_detail", "mom", "approval", "pms",
+                        "quotation_tracker", "import"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unknown page — expected 'part_detail', 'mom', 'approval' or 'pms'"
+                detail="Unknown page — expected 'part_detail', 'mom', 'approval', "
+                       "'pms', 'quotation_tracker' or 'import'"
             )
 
         # PMS — and everything inside it — is handed out only by the PMS & AOP
@@ -761,6 +812,12 @@ class UserController:
             employee.can_access_approval = allowed
         elif page == "quotation_tracker":
             employee.can_access_quotation_tracker = allowed
+        elif page == "import":
+            employee.can_access_import = allowed
+            # Revoking the page drops the per-file scoping with it, so a
+            # re-granted user starts clean instead of silently keeping an old list.
+            if not allowed:
+                employee.import_files = None
         elif page == "pms":
             employee.can_access_pms = allowed
             # Hiding PMS hides everything inside it — drop AOP rights too, so a
@@ -825,6 +882,56 @@ class UserController:
         # Nothing to scope per sheet once the Annual Reports page is hidden.
         if pages is not None and "annual" not in cleaned:
             employee.annual_tabs = None
+        db.commit()
+        db.refresh(employee)
+        return employee
+
+    @staticmethod
+    def set_import_files(db: Session, employee_id: int, admin_user_id: str, files):
+        """Choose WHICH files a user may upload on the Data Upload page: a list
+        of the FILE_TYPES names (app/routes/import_routes.py).
+
+        files=None clears the restriction, so the access flag opens every file
+        again. An empty list blocks them all. Master Admin only — the same gate
+        as the Data Upload access flag itself."""
+        admin = db.query(User).filter(User.user_id == admin_user_id).first()
+        if not admin or admin.role not in [UserRole.MASTER_ADMIN]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Master Admin can change Data Upload rights"
+            )
+
+        if files is not None and not isinstance(files, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="files must be a list of Data Upload file-type names"
+            )
+
+        allowed_types = _import_file_types()
+        for name in (files or []):
+            if name not in allowed_types:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unknown Data Upload file type '{name}'"
+                )
+        cleaned = [f for f in allowed_types if f in (files or [])]   # registry order
+
+        employee = db.query(User).filter(User.id == employee_id).first()
+        if not employee:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Employee not found"
+            )
+
+        if not employee.can_access_import:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Grant Data Upload access first, then choose the files"
+            )
+
+        # json.dumps([]) — "[]" — is stored deliberately: it means "no file at
+        # all", which is not the same as NULL ("no per-file restriction").
+        employee.import_files = None if files is None else json.dumps(cleaned)
         db.commit()
         db.refresh(employee)
         return employee

@@ -83,7 +83,7 @@ def get_db():
 
 # ENDPOINT - Daily Details
 @router.post("/my-performance/daily-details")
-async def get_my_performance_daily_details(
+def get_my_performance_daily_details(
     user_info: UserInfo,
     time_period: str = Query('all', description="Time period: all, month, 3months, 6months, year"),
     start_date: Optional[str] = Query(None, description="Start date for custom range (YYYY-MM-DD)"),
@@ -789,7 +789,7 @@ async def get_campaigns_list(
         )
     
 @router.post("/my-performance/non-followup-count")
-async def get_my_non_followup_count(
+def get_my_non_followup_count(
     user_info: UserInfo,
     db: Session = Depends(get_db)
 ):
@@ -1204,7 +1204,7 @@ async def get_my_all_followups(
         )
     
 @router.post("/check-export-permission")
-async def check_export_permission(
+def check_export_permission(
     user_info: UserInfo,
     db: Session = Depends(get_db)
 ):

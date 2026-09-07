@@ -94,6 +94,20 @@ def _require_pms_page(db: Session, user_id: Optional[str], user_role: Optional[s
     return user
 
 
+def _require_ho(db: Session, user_id: Optional[str], user_role: Optional[str],
+                page: str):
+    """A PMS page's DATA side — uploading a file, clearing the data, cancelling
+    an invoice, listing the upload batches. Those files are company-wide: a
+    branch user may read their own branch's report, but must never change what
+    everybody else reports on. So the page right is not enough here — the
+    caller must also be unscoped (Master Admin, or carrying the HO branch)."""
+    user = _require_pms_page(db, user_id, user_role, page)
+    if _branch_scope(user) is not None:
+        raise HTTPException(status_code=403,
+                            detail="Only Head Office can upload or change the PMS data files")
+    return user
+
+
 def _require_annual_tab(db: Session, user_id: Optional[str], user_role: Optional[str],
                         tab: str):
     """ONE sheet of the Annual Reports page. The 'annual' PMS page opens the
@@ -174,6 +188,18 @@ class SeUidIn(BaseModel):
     branch_id: Optional[str] = None
 
 
+class BranchReviewIn(BaseModel):
+    """The answers to the branch review an HR attendance upload opens.
+
+    engineers: [{row_id, branch_id}] — the branch this engineer belongs to,
+               written to the master row and pinned against later uploads.
+    aliases:   [{hr_branch, branch_id}] — what HR's own spelling of a branch
+               means, remembered so the next month resolves it on its own.
+    """
+    engineers: list = []
+    aliases: list = []
+
+
 class CancelRowIn(BaseModel):
     record_type: str                # 'part' | 'labour' — scopes the row lookup
     row_id: int                     # pms_sales_records.id of the ONE row
@@ -183,7 +209,7 @@ class CancelRowIn(BaseModel):
 # ---------------- AOP MASTER: TARGETS ---------------- #
 
 @router.get("/targets/year")
-async def get_targets_year(
+def get_targets_year(
     fy: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -194,7 +220,7 @@ async def get_targets_year(
 
 
 @router.post("/targets/year/bulk")
-async def save_targets_year(
+def save_targets_year(
     payload: TargetsYearSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -213,7 +239,7 @@ class HolidaysSaveIn(BaseModel):
 
 
 @router.get("/holidays")
-async def get_holidays(
+def get_holidays(
     fy: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -224,7 +250,7 @@ async def get_holidays(
 
 
 @router.post("/holidays")
-async def save_holidays(
+def save_holidays(
     payload: HolidaysSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -237,7 +263,7 @@ async def save_holidays(
 # ---------------- SR TYPE MASTER ---------------- #
 
 @router.get("/sr-types")
-async def get_sr_types(
+def get_sr_types(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -250,7 +276,7 @@ async def get_sr_types(
 
 
 @router.post("/sr-types")
-async def save_sr_types(
+def save_sr_types(
     payload: SrTypesSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -261,7 +287,7 @@ async def save_sr_types(
 
 
 @router.post("/heads")
-async def add_head(
+def add_head(
     payload: HeadIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -272,7 +298,7 @@ async def add_head(
 
 
 @router.delete("/heads/{head_id}")
-async def delete_head(
+def delete_head(
     head_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -283,7 +309,7 @@ async def delete_head(
 
 
 @router.post("/sr-types/sync")
-async def sync_sr_types(
+def sync_sr_types(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -293,7 +319,7 @@ async def sync_sr_types(
 
 
 @router.post("/sr-types/reset")
-async def reset_sr_types(
+def reset_sr_types(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -319,7 +345,7 @@ def _editable_sr_masters(user) -> set:
 
 
 @router.post("/sr-types/cross-check")
-async def cross_check_sr_types(
+def cross_check_sr_types(
     payload: SrCrossCheckIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -343,7 +369,7 @@ async def cross_check_sr_types(
 
 
 @router.post("/sr-types/cross-apply")
-async def cross_apply_sr_types(
+def cross_apply_sr_types(
     payload: SrCrossApplyIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -362,7 +388,7 @@ async def cross_apply_sr_types(
 # SR Type column.
 
 @router.get("/maxttr-sr-types")
-async def get_maxttr_sr_types(
+def get_maxttr_sr_types(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -375,7 +401,7 @@ async def get_maxttr_sr_types(
 
 
 @router.post("/maxttr-sr-types")
-async def save_maxttr_sr_types(
+def save_maxttr_sr_types(
     payload: MaxttrSrTypesSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -396,7 +422,7 @@ async def sync_maxttr_sr_types(
 
 
 @router.post("/maxttr-sr-types/reset")
-async def reset_maxttr_sr_types(
+def reset_maxttr_sr_types(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -406,7 +432,7 @@ async def reset_maxttr_sr_types(
 
 
 @router.post("/maxttr-heads")
-async def add_maxttr_head(
+def add_maxttr_head(
     payload: HeadIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -417,7 +443,7 @@ async def add_maxttr_head(
 
 
 @router.delete("/maxttr-heads/{head_id}")
-async def delete_maxttr_head(
+def delete_maxttr_head(
     head_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -431,7 +457,7 @@ async def delete_maxttr_head(
 # Drives the Employee Productivity report's ALLOCATE SR split.
 
 @router.get("/efsr-sr-types")
-async def get_efsr_sr_types(
+def get_efsr_sr_types(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -444,7 +470,7 @@ async def get_efsr_sr_types(
 
 
 @router.post("/efsr-sr-types")
-async def save_efsr_sr_types(
+def save_efsr_sr_types(
     payload: EfsrSrTypesSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -465,7 +491,7 @@ async def sync_efsr_sr_types(
 
 
 @router.post("/efsr-sr-types/reset")
-async def reset_efsr_sr_types(
+def reset_efsr_sr_types(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -475,7 +501,7 @@ async def reset_efsr_sr_types(
 
 
 @router.post("/efsr-heads")
-async def add_efsr_head(
+def add_efsr_head(
     payload: HeadIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -486,7 +512,7 @@ async def add_efsr_head(
 
 
 @router.delete("/efsr-heads/{head_id}")
-async def delete_efsr_head(
+def delete_efsr_head(
     head_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -501,7 +527,7 @@ async def delete_efsr_head(
 # synced out of the uploaded LMS file, read by the Employee Productivity report.
 
 @router.get("/lead-categories")
-async def get_lead_categories(
+def get_lead_categories(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -514,7 +540,7 @@ async def get_lead_categories(
 
 
 @router.post("/lead-categories")
-async def save_lead_categories(
+def save_lead_categories(
     payload: LeadMapSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -535,7 +561,7 @@ async def sync_lead_categories(
 
 
 @router.post("/lead-categories/reset")
-async def reset_lead_categories(
+def reset_lead_categories(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -545,7 +571,7 @@ async def reset_lead_categories(
 
 
 @router.post("/lead-cats")
-async def add_lead_cat(
+def add_lead_cat(
     payload: HeadIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -556,7 +582,7 @@ async def add_lead_cat(
 
 
 @router.delete("/lead-cats/{cat_id}")
-async def delete_lead_cat(
+def delete_lead_cat(
     cat_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -593,7 +619,7 @@ async def sync_se_uids(
 
 
 @router.post("/se-uid")
-async def save_se_uid(
+def save_se_uid(
     payload: SeUidIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -604,8 +630,47 @@ async def save_se_uid(
                           payload.branch_id)
 
 
+class SeUidStatusIn(BaseModel):
+    # 'Active' / 'Inactive' to TYPE a status; None or '' to clear it and hand
+    # the engineer back to whatever the training file says.
+    status: Optional[str] = None
+    left_on: Optional[date] = None
+    reason: Optional[str] = None
+
+
+@router.post("/se-uid/{row_id}/status")
+async def set_se_uid_status(
+    row_id: int,
+    payload: SeUidStatusIn,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Mark an engineer Active / Left from the SE UID Master.
+
+    Writes the same pms_training_status_overrides row the Training Report writes,
+    so the two pages can never drift apart."""
+    _require_master_only(db, user_id)
+    return await run_in_threadpool(pc.set_se_uid_status, db, row_id,
+                                   payload.status, payload.left_on,
+                                   payload.reason, user_id)
+
+
+@router.get("/se-uid/{row_id}/detail")
+async def se_uid_detail(
+    row_id: int,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """One engineer in full — the master row plus every month of HR attendance
+    matched to it. What the Edit dialog opens on."""
+    _require_master_only(db, user_id)
+    return await run_in_threadpool(pc.se_uid_detail, db, row_id)
+
+
 @router.delete("/se-uid/{row_id}")
-async def delete_se_uid(
+def delete_se_uid(
     row_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -615,17 +680,50 @@ async def delete_se_uid(
     return pc.delete_se_uid(db, row_id)
 
 
-@router.post("/se-uid/import")
-async def import_se_uids(
-    file: UploadFile = File(...),
+@router.get("/se-uid/branch-review")
+async def se_uid_branch_review_pending(
+    month: Optional[str] = None,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """Two-column Excel (SE Name, SE UID) — existing names update in place."""
+    """The branch questions the stored attendance still raises — so a month
+    uploaded earlier, or a review closed with 'Later', can still be answered."""
+    _require_master_only(db, user_id)
+    return await run_in_threadpool(pc.pending_branch_review, db, month)
+
+
+@router.post("/se-uid/branch-review")
+async def se_uid_branch_review(
+    payload: BranchReviewIn,
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Save the branch decisions taken after an HR attendance upload — the
+    engineer's own branch, and what HR's spelling of a branch means."""
+    _require_master_only(db, user_id)
+    return await run_in_threadpool(pc.apply_branch_review, db,
+                                   payload.engineers, payload.aliases, user_id)
+
+
+@router.post("/se-uid/import")
+async def import_se_uids(
+    file: UploadFile = File(...),
+    month: Optional[str] = Form(None),          # 'YYYY-MM', attendance file only
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Two-column Excel (SE Name, SE UID) — existing names update in place.
+
+    Also accepts HR's monthly 'Attendance Summary' export, recognised by its own
+    columns: that stores the month in pms_attendance_summary and fills the blanks
+    in the master. `month` is the period it covers, chosen in the dialog because
+    the file carries no month column of its own."""
     _require_master_only(db, user_id)
     contents = await file.read()
-    return await run_in_threadpool(pc.import_se_uids, db, contents, user_id)
+    return await run_in_threadpool(pc.import_se_uids, db, contents, user_id, month)
 
 
 # ---------------- FILE UPLOAD / DATA ---------------- #
@@ -640,7 +738,7 @@ async def upload_file(
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    _require_pms_page(db, user_id, user_role, "sales_labour")
+    _require_ho(db, user_id, user_role, "sales_labour")
     contents = await file.read()
     if validate_only:
         return pc.validate_file(contents, file.filename, record_type)
@@ -651,44 +749,44 @@ async def upload_file(
 
 
 @router.get("/upload/progress")
-async def upload_progress(token: str):
+def upload_progress(token: str):
     """Live progress of a running import (no auth — token is an opaque,
     client-generated random id and the payload is just {pct, stage})."""
     return {"success": True, **pc.get_upload_progress(token)}
 
 
 @router.get("/uploads")
-async def get_uploads(
+def get_uploads(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    _require_pms_page(db, user_id, user_role, "sales_labour")
+    _require_ho(db, user_id, user_role, "sales_labour")
     return {"success": True, "items": pc.list_batches(db)}
 
 
 @router.delete("/data")
-async def clear_data(
+def clear_data(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    _require_pms_page(db, user_id, user_role, "sales_labour")
+    _require_ho(db, user_id, user_role, "sales_labour")
     return pc.clear_all_data(db)
 
 
 @router.get("/data/summary")
-async def get_data_summary(
+def get_data_summary(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    _require_pms_page(db, user_id, user_role, "sales_labour")
-    return {"success": True, "summary": pc.data_summary(db)}
+    user = _require_pms_page(db, user_id, user_role, "sales_labour")
+    return {"success": True, "summary": pc.data_summary(db, _branch_scope(user))}
 
 
 @router.get("/data/preview")
-async def get_data_preview(
+def get_data_preview(
     record_type: str,
     limit: int = 200,
     offset: int = 0,
@@ -698,21 +796,21 @@ async def get_data_preview(
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    _require_pms_page(db, user_id, user_role, "sales_labour")
+    user = _require_pms_page(db, user_id, user_role, "sales_labour")
     page = pc.preview_rows(db, record_type, min(limit, 500), max(offset, 0),
-                           search, cancelled)
+                           search, cancelled, _branch_scope(user))
     return {"success": True, "items": page["items"], "total": page["total"],
             "cancelled_total": page["cancelled_total"]}
 
 
 @router.post("/data/cancel-row")
-async def cancel_row(
+def cancel_row(
     payload: CancelRowIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    _require_pms_page(db, user_id, user_role, "sales_labour")
+    _require_ho(db, user_id, user_role, "sales_labour")
     if payload.record_type not in ("part", "labour"):
         raise HTTPException(status_code=400, detail="record_type must be 'part' or 'labour'")
     return pc.set_row_cancelled(db, payload.record_type, payload.row_id,
@@ -766,7 +864,7 @@ async def get_training_report(
 
 
 @router.get("/training/summary")
-async def get_training_summary(
+def get_training_summary(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -776,7 +874,7 @@ async def get_training_summary(
 
 
 @router.post("/training/status")
-async def set_training_status(
+def set_training_status(
     payload: TrainingStatusIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -795,7 +893,7 @@ async def set_training_status(
 
 
 @router.delete("/training/data")
-async def clear_training_data(
+def clear_training_data(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -807,7 +905,7 @@ async def clear_training_data(
 # ---------------- REPORT ---------------- #
 
 @router.get("/report")
-async def get_report(
+def get_report(
     as_on: date,
     from_date: Optional[date] = None,
     part_as_on: Optional[date] = None,     # per-type period ends — used by the
@@ -816,8 +914,12 @@ async def get_report(
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    _require_pms_page(db, user_id, user_role, "sales_labour")
-    return pc.generate_report(db, as_on, from_date, part_as_on, labour_as_on)
+    user = _require_pms_page(db, user_id, user_role, "sales_labour")
+    # A branch user gets their OWN branches' report — rows, totals, the top
+    # tiles and every breakdown are summed over that scope in the controller,
+    # so the figures cannot be widened by calling this endpoint directly.
+    return pc.generate_report(db, as_on, from_date, part_as_on, labour_as_on,
+                              _branch_scope(user))
 
 
 @router.get("/report/fy-summary")
@@ -829,15 +931,18 @@ async def report_fy_summary(
 ):
     """Whole-FY target vs achievement per branch and month. Feeds the FY /
     Quarterly / Month-wise panels, which ignore the report period picker."""
-    _require_pms_page(db, user_id, user_role, "sales_labour")
+    user = _require_pms_page(db, user_id, user_role, "sales_labour")
     if fy is None:
         today = date.today()
         fy = today.year if today.month >= 4 else today.year - 1
-    return await run_in_threadpool(pc.fy_summary_report, db, fy)
+    # The page hides these three panels from a branch user; scoped anyway so a
+    # direct call cannot read another branch's year.
+    return await run_in_threadpool(pc.fy_summary_report, db, fy,
+                                   _branch_scope(user))
 
 
 @router.get("/report/branch-detail")
-async def report_branch_detail(
+def report_branch_detail(
     as_on: date,
     from_date: Optional[date] = None,
     branches: str = "",                    # comma-separated branch ids
@@ -845,13 +950,17 @@ async def report_branch_detail(
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    _require_pms_page(db, user_id, user_role, "sales_labour")
+    user = _require_pms_page(db, user_id, user_role, "sales_labour")
     ids = [b for b in branches.split(",") if b.strip()]
-    return pc.branch_detail_report(db, as_on, from_date, ids)
+    scope = _branch_scope(user)
+    if scope is not None:                  # never outside the caller's branches
+        ok = {pc._norm_branch_id(b) for b in scope}
+        ids = [b for b in ids if pc._norm_branch_id(b) in ok]
+    return pc.branch_detail_report(db, as_on, from_date, ids, scope)
 
 
 @router.get("/report/employee-productivity")
-async def report_employee_productivity(
+def report_employee_productivity(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -871,16 +980,18 @@ async def report_se_performance(
 ):
     """SE Performance — the Annexure I commitment matrix, per service engineer.
 
-    Returns the ROSTER only: the branches with their region, and the engineers
-    of the SE UID Master with what the Training Report knows about each. The
-    twelve commitments' figures are generated in the browser for now — the
-    counting rules are not agreed yet — so this endpoint stays a master read."""
+    Returns the ROSTER only, read from the TRAINING REPORT: the branches with
+    their region, and that file's ACTIVE engineers — name, UID NO, job title,
+    hire date and every skill on record — with HR's EMPLOYEE CODE joined on
+    (the same lookup the SE UID Master uses). The commitments' figures are
+    generated in the browser for now — the counting rules are not agreed yet —
+    so this endpoint stays a master read."""
     _require_pms_page(db, user_id, user_role, "se_performance")
     return await run_in_threadpool(pc.se_performance_roster, db)
 
 
 @router.get("/report/sr-allocation")
-async def report_sr_allocation(
+def report_sr_allocation(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -914,6 +1025,25 @@ async def report_ep_se_records(
                                    _branch_scope(user))
 
 
+@router.get("/report/employee-productivity/other-records")
+async def report_ep_other_records(
+    region: str,
+    date_from: Optional[str] = "",
+    date_to: Optional[str] = "",
+    user_id: Optional[str] = Header(None),
+    user_role: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Employee Productivity -> the SRs behind an 'MH Other' / 'KA Other' row.
+
+    Work done in this region by engineers whose own branch is a different one.
+    Same page right and the same branch scope as the report itself."""
+    user = _require_pms_page(db, user_id, user_role, "employee_productivity")
+    return await run_in_threadpool(pc.ep_other_records, db, region,
+                                   date_from or "", date_to or "",
+                                   _branch_scope(user))
+
+
 @router.get("/report/sr-allocation/se-records")
 async def report_srar_se_records(
     name: str,
@@ -938,7 +1068,7 @@ async def report_srar_se_records(
 
 
 @router.get("/report/annual/service-penetration")
-async def report_annual_service_penetration(
+def report_annual_service_penetration(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -1046,7 +1176,7 @@ class AmcTargetsSaveIn(BaseModel):
 
 
 @router.get("/amc-targets")
-async def get_amc_targets(
+def get_amc_targets(
     fy: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1057,7 +1187,7 @@ async def get_amc_targets(
 
 
 @router.post("/amc-targets")
-async def save_amc_targets(
+def save_amc_targets(
     payload: AmcTargetsSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1078,7 +1208,7 @@ class CdiTargetsSaveIn(BaseModel):
 
 
 @router.get("/cdi-targets")
-async def get_cdi_targets(
+def get_cdi_targets(
     fy: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1089,7 +1219,7 @@ async def get_cdi_targets(
 
 
 @router.post("/cdi-targets")
-async def save_cdi_targets(
+def save_cdi_targets(
     payload: CdiTargetsSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1128,7 +1258,7 @@ class ServiceLoadSrTypesSaveIn(BaseModel):
 
 
 @router.get("/service-load-sr-types")
-async def get_service_load_sr_types(
+def get_service_load_sr_types(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -1141,7 +1271,7 @@ async def get_service_load_sr_types(
 
 
 @router.post("/service-load-sr-types")
-async def save_service_load_sr_types(
+def save_service_load_sr_types(
     payload: ServiceLoadSrTypesSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1162,7 +1292,7 @@ async def sync_service_load_sr_types(
 
 
 @router.post("/service-load-sr-types/reset")
-async def reset_service_load_sr_types(
+def reset_service_load_sr_types(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -1172,7 +1302,7 @@ async def reset_service_load_sr_types(
 
 
 @router.post("/service-load-heads")
-async def add_service_load_head(
+def add_service_load_head(
     payload: HeadIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1183,7 +1313,7 @@ async def add_service_load_head(
 
 
 @router.delete("/service-load-heads/{head_id}")
-async def delete_service_load_head(
+def delete_service_load_head(
     head_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1205,7 +1335,7 @@ class ServiceLoadTargetsSaveIn(BaseModel):
 
 
 @router.get("/service-load-targets")
-async def get_service_load_targets(
+def get_service_load_targets(
     fy: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1220,7 +1350,7 @@ class ServiceLoadSeCountSaveIn(BaseModel):
 
 
 @router.get("/service-load-se-counts")
-async def get_service_load_se_counts(
+def get_service_load_se_counts(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -1231,7 +1361,7 @@ async def get_service_load_se_counts(
 
 
 @router.post("/service-load-se-counts")
-async def save_service_load_se_counts(
+def save_service_load_se_counts(
     payload: ServiceLoadSeCountSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1247,7 +1377,7 @@ class ServiceLoadManualSaveIn(BaseModel):
 
 
 @router.get("/service-load-manual")
-async def get_service_load_manual(
+def get_service_load_manual(
     fy: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1259,7 +1389,7 @@ async def get_service_load_manual(
 
 
 @router.post("/service-load-manual")
-async def save_service_load_manual(
+def save_service_load_manual(
     payload: ServiceLoadManualSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -1270,7 +1400,7 @@ async def save_service_load_manual(
 
 
 @router.post("/service-load-targets")
-async def save_service_load_targets(
+def save_service_load_targets(
     payload: ServiceLoadTargetsSaveIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),

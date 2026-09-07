@@ -42,13 +42,19 @@ export default function EmployeeApprovalView() {
     const [pendingOnly, setPendingOnly] = useState(false);
     const actionable = useMemo(() => apps.filter(a => a.can_act === true), [apps]);
 
+    // My NFA — the records THIS user created. The summary cards above keep
+    // counting everything the user can SEE (an HO member sees every branch),
+    // but the table and its type buttons are the user's OWN NFAs; the Pending
+    // My Approval toggle swaps in the queue waiting on them instead.
+    const mine = useMemo(() => apps.filter(a => a.created_by === user.user_id),
+        [apps, user.user_id]);
+
     // All filters EXCEPT the type — the type tabs show per-type counts of this set
-    const filteredBase = useMemo(() => apps.filter(a =>
-        (!pendingOnly || a.can_act === true) &&
+    const filteredBase = useMemo(() => (pendingOnly ? actionable : mine).filter(a =>
         (!statusFilter || a.status === statusFilter) &&
         (!search || [a.app_no, a.customer_name, a.invoice_no, a.sr_no].some(
             v => (v || '').toLowerCase().includes(search.toLowerCase())))
-    ), [apps, pendingOnly, statusFilter, search]);
+    ), [actionable, mine, pendingOnly, statusFilter, search]);
 
     const typeCounts = useMemo(() => ({
         discounting: filteredBase.filter(a => a.request_type === 'discounting').length,
@@ -110,7 +116,8 @@ export default function EmployeeApprovalView() {
                 ? <div className="py-16 text-center text-sm text-gray-400">Loading applications…</div>
                 : <ApplicationsTable apps={filtered} type={typeFilter}
                     onOpen={app => app.status === 'draft' ? setEditDraft(app) : setSelected(app)}
-                    emptyText="No applications yet — create your first approval application" />}
+                    emptyText={pendingOnly ? 'Nothing waiting for your approval'
+                        : 'No applications yet — create your first approval application'} />}
 
             {showCreate && (
                 <CreateApplicationModal onClose={() => setShowCreate(false)} onCreated={load} />

@@ -376,6 +376,92 @@ def _norm_branch_id(value) -> str:
     return re.sub(r"[\s\-/]+", "_", s).upper()
 
 
+def _scope_ids(allowed_branches):
+    """The caller's branch codes, normalised the way every stored branch id is
+    — or None for "every branch". `_branch_scope` (routes/pms_routes.py) reads
+    them off the signed-in user, so the Sales & Labour report can be cut to the
+    branches a non-HO user actually belongs to. An EMPTY list is a real answer
+    (a user with no branch at all): it means no branch, not every branch."""
+    if allowed_branches is None:
+        return None
+    return sorted({_norm_branch_id(b) for b in allowed_branches
+                   if str(b or "").strip()})
+
+
+# A branch user looks back THREE MONTHS: the month their own data ends in and
+# the two before it. Head Office keeps the whole history. Anchored on the data
+# rather than on today so the window follows the uploaded files — the same
+# max date the page's period picker is built from.
+SCOPED_MONTHS_BACK = 3
+
+
+def _scoped_floor(db: Session, scope, months_back: int = SCOPED_MONTHS_BACK):
+    """The earliest invoice date a branch user may report on, or None when the
+    caller is not scoped (`scope is None`) or has no data at all."""
+    if scope is None:
+        return None
+    last = (db.query(func.max(PmsSalesRecord.claim_invoice_date))
+            .filter(PmsSalesRecord.branch_id.in_(scope)).scalar())
+    if last is None:
+        return None
+    if hasattr(last, "date"):
+        last = last.date()
+    y, m = last.year, last.month - (months_back - 1)
+    while m < 1:
+        y, m = y - 1, m + 12
+    return date(y, m, 1)
+
+
+# ---- SR closures: the third measure of the Part & Labour Sale report ------
+# TWO FILES, one measure each — exactly the split the Employee Productivity
+# report uses, so the three reports always agree:
+#
+#   CLOSED     the MaxTTR file ('Response Time & MaxTTR Details'), one row per
+#              SR NUMBER: every row with an SR CLOSE DATE and an SE NAME,
+#              counted on that date. Branch is the MaxTTR row's own BRANCH ID
+#              (already normalised) — never the branch name, which the files
+#              spell differently between imports.
+#   ALLOCATED  the EFSR file, counted on TASK ASSIGNED DATE, branch = the row's
+#              SD BRANCH CODE. Independent of the closures: an SR can be
+#              allocated in one period and closed in another.
+
+def _maxttr_closed_rows(db: Session):
+    """Base MaxTTR query: the closed SRs that belong to an engineer — the same
+    filter Employee Productivity counts its Close SR on."""
+    from app.models.customer_model import ResponseTimeMaxTTR as R
+    return (db.query(R)
+            .filter(R.sr_close_date.isnot(None),
+                    R.se_name.isnot(None), R.se_name != ""))
+
+
+def _maxttr_last_close(db: Session, scope=None):
+    """The last date the MaxTTR file has a closure on — the SR row's own 'as on'
+    date, the way the sales files have theirs. Read within the caller's branches
+    so a branch user's window follows THEIR data."""
+    from app.models.customer_model import ResponseTimeMaxTTR as R
+    rows = (_maxttr_closed_rows(db)
+            .with_entities(R.branch_id, func.max(R.sr_close_date))
+            .group_by(R.branch_id).all())
+    ok = None if scope is None else set(scope)
+    dates = [d for b, d in rows
+             if d is not None and (ok is None or _norm_branch_id(b) in ok)]
+    if not dates:
+        return None
+    last = max(dates)
+    return last.date() if hasattr(last, "date") else last
+
+
+def _efsr_rows(db: Session):
+    """Base EFSR query: the rows that belong to an engineer. The branch scope is
+    NOT pushed down — stored branch codes need normalising before they can be
+    compared, so callers drop out-of-scope branches from the grouped result
+    (a couple of dozen rows) instead."""
+    from app.models.customer_model import EFSRReport
+    return (db.query(EFSRReport)
+            .filter(EFSRReport.service_engineer_uid.isnot(None),
+                    EFSRReport.service_engineer_uid != ""))
+
+
 def _parse_date(value):
     """DATE ONLY — any time part ('2026-07-01 11:16:21') is dropped.
 
@@ -941,7 +1027,20 @@ _VERSION_SQL = text("""
            (SELECT COUNT(*) FROM dbo.pms_service_load_targets),
            (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(fy, metric, scope, scope_key, target_value)), 0)
               FROM dbo.pms_service_load_pct_targets),
-           (SELECT COUNT(*) FROM dbo.pms_service_load_pct_targets)
+           (SELECT COUNT(*) FROM dbo.pms_service_load_pct_targets),
+           -- SE Performance reads HR's attendance summary for the employee code
+           -- and Employee Productivity for its HR wise attendance column, and
+           -- both are cached, so a new attendance month has to move the print.
+           (SELECT COUNT(*) FROM dbo.pms_attendance_summary),
+           (SELECT ISNULL(MAX(id), 0) FROM dbo.pms_attendance_summary),
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(e_code, uid, period_month)), 0)
+              FROM dbo.pms_attendance_summary),
+           -- and the DAY-WISE attendance behind SE Performance's attendance
+           -- table, which is rewritten a whole month at a time
+           (SELECT COUNT(*) FROM dbo.pms_attendance_day),
+           (SELECT ISNULL(MAX(id), 0) FROM dbo.pms_attendance_day),
+           (SELECT ISNULL(CHECKSUM_AGG(CHECKSUM(e_code, work_date, code)), 0)
+              FROM dbo.pms_attendance_day)
 """)
 
 
@@ -969,15 +1068,25 @@ def _cached(db: Session, key, build):
     return value
 
 
-def data_summary(db: Session):
+def data_summary(db: Session, allowed_branches=None):
     """Row counts + invoice-date range per record type (shown on the page).
-    One grouped aggregate instead of six queries — same output, index-only."""
-    by_rt = {r[0]: r for r in
-             db.query(PmsSalesRecord.record_type,
-                      func.count(PmsSalesRecord.id),
-                      func.min(PmsSalesRecord.claim_invoice_date),
-                      func.max(PmsSalesRecord.claim_invoice_date))
-             .group_by(PmsSalesRecord.record_type).all()}
+    One grouped aggregate instead of six queries — same output, index-only.
+
+    `allowed_branches` (None = every branch) cuts the counts and the date range
+    to the caller's own branches AND to their three-month window — this is what
+    the page's period picker is built from, so narrowing it here is what greys
+    out every older month in the month grid and the day calendar."""
+    scope = _scope_ids(allowed_branches)
+    floor = _scoped_floor(db, scope)
+    q = db.query(PmsSalesRecord.record_type,
+                 func.count(PmsSalesRecord.id),
+                 func.min(PmsSalesRecord.claim_invoice_date),
+                 func.max(PmsSalesRecord.claim_invoice_date))
+    if scope is not None:
+        q = q.filter(PmsSalesRecord.branch_id.in_(scope))
+    if floor is not None:
+        q = q.filter(PmsSalesRecord.claim_invoice_date >= floor)
+    by_rt = {r[0]: r for r in q.group_by(PmsSalesRecord.record_type).all()}
     out = {}
     for rt in ("part", "labour"):
         row = by_rt.get(rt)
@@ -990,12 +1099,15 @@ def data_summary(db: Session):
 
 
 def preview_rows(db: Session, record_type: str, limit: int = 200, offset: int = 0,
-                 search: str = None, cancelled: str = None):
+                 search: str = None, cancelled: str = None, allowed_branches=None):
     """One page of stored rows (newest first) + the total count, so the
     frontend can lazy-load the full dataset with infinite scroll.
     `search` filters on CLAIM INVOICE NO (contains, case-insensitive).
     `cancelled`: None/'all' = every row, 'cancelled' = only cancelled
-    invoices, 'active' = only non-cancelled."""
+    invoices, 'active' = only non-cancelled.
+    `allowed_branches` (None = every branch) keeps a branch user's preview —
+    and its counts — inside their own branches and their three-month window,
+    even though the page hides the preview box from them entirely."""
     # Only the columns the preview table shows — a full entity load would also
     # drag every internal column (dedupe_key, batch id, timestamps …) across
     # the wire for each of the 200 rows.
@@ -1011,8 +1123,14 @@ def preview_rows(db: Session, record_type: str, limit: int = 200, offset: int = 
             PmsSalesRecord.quantity, PmsSalesRecord.series, PmsSalesRecord.sr_number,
             PmsSalesRecord.is_cancelled, PmsSalesRecord.cancelled_by,
             PmsSalesRecord.cancelled_at, PmsSalesRecord.extra_data)
+    scope = _scope_ids(allowed_branches)
+    floor = _scoped_floor(db, scope)
     q = (db.query(PmsSalesRecord)
          .filter(PmsSalesRecord.record_type == record_type))
+    if scope is not None:
+        q = q.filter(PmsSalesRecord.branch_id.in_(scope))
+    if floor is not None:
+        q = q.filter(PmsSalesRecord.claim_invoice_date >= floor)
     if search:
         # Escape LIKE wildcards (SQL Server also treats [ as one) so the user's
         # text is matched literally anywhere inside the invoice no.
@@ -1027,11 +1145,15 @@ def preview_rows(db: Session, record_type: str, limit: int = 200, offset: int = 
             .offset(offset).limit(limit).all())
     # Page count + the type's cancelled-row count (whole dataset, so the filter
     # chip can show it regardless of the current search/page) in ONE round trip.
-    total, cancelled_total = (
-        db.query(func.count(),
-                 func.sum(sa_case((PmsSalesRecord.is_cancelled == True, 1),  # noqa: E712
-                                  else_=0)))
-        .filter(PmsSalesRecord.record_type == record_type).first())
+    totq = (db.query(func.count(),
+                     func.sum(sa_case((PmsSalesRecord.is_cancelled == True, 1),  # noqa: E712
+                                      else_=0)))
+            .filter(PmsSalesRecord.record_type == record_type))
+    if scope is not None:
+        totq = totq.filter(PmsSalesRecord.branch_id.in_(scope))
+    if floor is not None:
+        totq = totq.filter(PmsSalesRecord.claim_invoice_date >= floor)
+    total, cancelled_total = totq.first()
     if search or cancelled in ("cancelled", "active"):
         total = q.count()     # the page is filtered — count that filter
     return {
@@ -1233,7 +1355,11 @@ def get_targets_year_payload(db: Session, fy_start: int):
     """Branch rows for the whole FY (spare/labour per month, in rupees) plus
     the monthly working-days settings. Branch list + responsible person are
     synced from the Profile page on every load, same as the month view; rows
-    are materialised in the DB only on save."""
+    are materialised in the DB only on save.
+
+    NOT here: the SR CLOSURE target of the report's third tile row. It is set
+    in AOP Master -> Service Load AOP ('Service Request Closure (Nos.)'), which
+    is the one place that closure target lives."""
     months = _fy_months(fy_start)
     access_rows = _user_branch_rows(db)      # read once, used by both helpers
     branches = _profile_branches(db, access_rows)
@@ -2262,128 +2388,1221 @@ def se_uid_branches(db: Session):
             for b in sorted(names, key=_branch_sort_key)]
 
 
+def se_uid_employee_codes(db: Session):
+    """HR's EMPLOYEE CODE per service engineer — ({UID: code}, {name: code}).
+
+    The dealership's own employee code lives in exactly one place: HR's monthly
+    'Attendance Summary' (pms_attendance_summary.e_code — the same value as
+    users.user_id, e.g. '31250160'). No KOEL file carries it. In particular the
+    Training Report's EMPLOYEE TICKET NUMBER is NOT it: that is KOEL's own
+    12-digit reference ('531011250895'), and printing it where a reader expects
+    an employee code puts a number on the page that nobody here can look up.
+    So every page that wants an employee code resolves it through here.
+
+    Two dictionaries, because the join has two rules and they are tried in this
+    order. UID FIRST — it is the identity, and it survives a name spelt two
+    ways ('ADITYA PATHARE' in the training file is 'Aditya Patare' in HR's).
+    The squashed name second, for engineers HR lists without a usable UID: the
+    attendance file writes 'UID Pending' / 'UID Hold' for a new joiner, which
+    is not a UID and must never be joined on. Both keys are squashed with
+    _tight(), because HR's name_key keeps the spacing and dots the other files
+    drop ('AFREEN.MS KOPPALAD').
+
+    The LATEST month wins where an engineer appears in several: HR re-states the
+    code every month, so the newest statement is the current one.
+    """
+    by_uid, by_name = _se_uid_hr_index(db, "code")
+    return by_uid, by_name
+
+
+def _se_uid_hr_index(db: Session, field: str):
+    """({UID: value}, {squashed name: value}) out of HR's Attendance Summary.
+
+    The shared half of se_uid_employee_codes() and se_uid_joining_dates(): one
+    pass, one set of join rules, two things to project out of it. Kept separate
+    from the public pair so those two can keep their simple contracts —
+    pms_training_controller unpacks the codes as two dicts of strings.
+    """
+    from app.models.pms_model import PmsAttendanceSummary
+
+    by_uid, by_name = {}, {}
+    for r in (db.query(PmsAttendanceSummary)
+              .order_by(PmsAttendanceSummary.period_month).all()):
+        if field == "code":
+            val = (r.e_code or "").strip()
+        else:
+            val = r.joining_date.isoformat() if r.joining_date else ""
+        if not val:
+            continue
+        uid = _tight(r.uid)
+        if uid and "PENDING" not in uid and "HOLD" not in uid:
+            by_uid[uid] = val
+        nk = _tight(r.name_key or r.employee_name)
+        if nk:
+            by_name[nk] = val
+    return by_uid, by_name
+
+
+def se_uid_joining_dates(db: Session):
+    """HR's DATE OF JOINING per engineer — ({UID: iso}, {name: iso}).
+
+    The date the SE UID Master shows in its Joining Date column, and therefore
+    the one 'With KCGL' on the signed matrix is counted from. It lives in HR's
+    monthly Attendance Summary; neither the SE UID master table nor any KOEL
+    file carries it. Same join, same precedence, same latest-month-wins rule as
+    the employee code beside it."""
+    return _se_uid_hr_index(db, "joined")
+
+
 def list_se_uids(db: Session, branch_names=None):
     """Master rows straight from the table — no file scanning, so the Profile
-    page renders instantly."""
+    page renders instantly.
+
+    The one thing not on the table is HR's EMPLOYEE CODE: it comes from the
+    Attendance Summary, joined on UID and then on the squashed name (see
+    se_uid_employee_codes). A blank means HR's file has not named this engineer
+    yet, and the Profile page shows a dash."""
     names = branch_names or {}
-    return [{"id": r.id, "se_name": r.se_name, "se_uid": r.se_uid or "",
-             "uids": _uid_list(r.se_uid),
-             "branch_id": r.branch_id or "",
-             "branch_name": names.get(r.branch_id or "", ""),
-             "in_maxttr": bool(r.src_maxttr), "in_lms": bool(r.src_lms),
-             "in_efsr": bool(r.src_efsr)}
-            for r in db.query(PmsSeUid).order_by(PmsSeUid.se_name).all()]
+    code_uid, code_name = se_uid_employee_codes(db)
+    join_uid, join_name = se_uid_joining_dates(db)
+
+    def _pick_hr(row, uids, by_uid, by_name):
+        for u in uids:
+            hit = by_uid.get(_tight(u))
+            if hit:
+                return hit
+        return by_name.get(_tight(row.name_key or row.se_name), "")
+
+    out = []
+    for r in db.query(PmsSeUid).order_by(PmsSeUid.se_name).all():
+        uids = _uid_list(r.se_uid)
+        out.append({"id": r.id, "se_name": r.se_name, "se_uid": r.se_uid or "",
+                    "uids": uids,
+                    "e_code": _pick_hr(r, uids, code_uid, code_name),
+                    # the page has a Joining Date column and has been drawing a
+                    # dash in it for everyone — nothing ever sent the value
+                    "joining_date": _pick_hr(r, uids, join_uid, join_name) or None,
+                    "branch_id": r.branch_id or "",
+                    "branch_name": names.get(r.branch_id or "", ""),
+                    "branch_pinned": bool(r.branch_pinned),
+                    "in_maxttr": bool(r.src_maxttr), "in_lms": bool(r.src_lms),
+                    "in_efsr": bool(r.src_efsr)})
+    return out
+
+
+def _pms_data_window(db: Session):
+    """The first and last date the PMS reports have any data for.
+
+    THE SAME SIX COLUMNS Employee Productivity walks to set its own
+    meta.min_date / max_date, so the two reports share one idea of where the
+    data stops. EP arrives at the window as a by-product of its row loops;
+    here it is six MAX/MIN aggregates, which is the whole cost.
+
+    It matters because WORKING DAYS are prorated to it. The AOP master says
+    August has 26 available man-days, but the files only reach the 24th — and
+    on this data the boundary is set by the LMS Insia ORDER CREATION DATE
+    (2026-08-24), later than every SR date in the MaxTTR file. Divide a month's
+    work by 26 man-days when the data covers 24 days of it and every engineer
+    reports low; EP divides by 20 and read one man at 1.05 where this report
+    read 0.81.
+    """
+    from app.models.customer_model import (ResponseTimeMaxTTR, LMSData,
+                                           EFSRReport, CDIDetailReport,
+                                           LMSInsia)
+
+    cols = ((ResponseTimeMaxTTR, "sr_close_date"),
+            (ResponseTimeMaxTTR, "sr_task_end_date"),
+            (LMSData, "lead_created_date"),
+            (LMSInsia, "order_creation_date"),
+            (EFSRReport, "task_assigned_date"),
+            (CDIDetailReport, "activity_end_date"))
+    lo = hi = None
+    for model, name in cols:
+        col = getattr(model, name, None)
+        if col is None:
+            continue
+        try:
+            a, b = db.query(func.min(cast(col, Date)), func.max(cast(col, Date))).first()
+        except Exception as e:                     # a file the site has not got
+            print(f"[se-performance] data window skipped {name}: {e}")
+            continue
+        if a and (lo is None or a < lo):
+            lo = a
+        if b and (hi is None or b > hi):
+            hi = b
+    return (lo.isoformat() if lo else None), (hi.isoformat() if hi else None)
+
+
+def _att_resolver(people):
+    """A function that turns an attendance row's identity into a roster UID.
+
+    THE JOIN IS EXACT WHERE IT CAN BE. This roster already carries HR's own
+    E CODE (see se_uid_employee_codes), and e_code is the key both attendance
+    files are written on, so that match is an identity rather than a guess. UID
+    comes second, the squashed name third — the files write 'UID Pending' for a
+    new joiner, which is not a UID and is never joined on.
+    """
+    by_code, by_uid, by_name = {}, {}, {}
+    for p in people.values():
+        if p.get("code"):
+            by_code.setdefault(str(p["code"]).strip().upper(), p["uid"])
+        by_uid.setdefault(p["uid"].strip().upper(), p["uid"])
+        by_name.setdefault(_tight(p["name"]), p["uid"])
+
+    def resolve(e_code, uid, name):
+        u = _tight(uid)
+        return (by_code.get(str(e_code or "").strip().upper())
+                or (by_uid.get(u) if u and "PENDING" not in u and "HOLD" not in u
+                    else None)
+                or by_name.get(_tight(name)))
+
+    return resolve
+
+
+def _se_performance_attendance(db: Session, resolve):
+    """HR's attendance DAY BY DAY, per engineer, per month.
+
+    Out of pms_attendance_day — the 'Attendance <Month>' export, the only
+    attendance source with a date on it. Returned as ONE STRING PER MONTH, a
+    character per day of that month:
+
+        P present   O out-door duty   H half day
+        L leave     A absent
+        W weekly off  C c-off   Y holiday   -  no data
+
+    A string, not 31 fields: it is what the SE Performance attendance table
+    draws, it survives the JSON round trip at a twentieth of the size, and the
+    day a character sits on is its index — position 0 is the 1st.
+
+    `resolve(e_code, uid, name)` is the caller's own join — SE Performance
+    passes _att_resolver() and is keyed by roster UID, Employee Productivity
+    passes its own and is keyed by employee index — so the keys of the two maps
+    are whatever it returns, and None means the row belongs to nobody here.
+
+    Returns ({who: {'YYYY-MM': codes}}, {who: {'YYYY-MM': days worked}},
+             [the months uploaded]).
+    Days worked is P and O at a day each and H at half a day — the file's own
+    arithmetic, which is why it is taken from the day cells rather than from
+    the summary's columns.
+    """
+    from app.models.pms_model import PmsAttendanceDay
+
+    codes, months = {}, set()
+    rows = (db.query(PmsAttendanceDay.period_month, PmsAttendanceDay.work_date,
+                     PmsAttendanceDay.e_code, PmsAttendanceDay.uid,
+                     PmsAttendanceDay.name_key, PmsAttendanceDay.code)
+            .order_by(PmsAttendanceDay.work_date).all())
+    for month, wdate, e_code, uid, name_key, code in rows:
+        month = (month or "").strip()
+        if len(month) != 7 or wdate is None:
+            continue
+        months.add(month)
+        who = resolve(e_code, uid, name_key)
+        if who is None:
+            continue
+        span = _att_month_days(month)
+        if not span:
+            continue
+        buf = codes.setdefault(who, {}).setdefault(month, ["-"] * span[2])
+        i = wdate.day - 1
+        if 0 <= i < len(buf):
+            buf[i] = (code or "-")[:1]
+
+    out, worked = {}, {}
+    for who, per_month in codes.items():
+        for month, buf in per_month.items():
+            s = "".join(buf)
+            out.setdefault(who, {})[month] = s
+            worked.setdefault(who, {})[month] = round(
+                sum(_ATT_WORTH.get(c, 0.0) for c in s), 2)
+    return out, worked, sorted(months)
+
+
+def _se_performance_hr_days(db: Session, resolve):
+    """HR's DAYS WORKED per engineer per month.
+
+    Day-wise first, the whole-month summary second. Both come off HR's monthly
+    export and they agree by construction — the summary's counts ARE the totals
+    of the day file's own cells — but the day file is the one that can be
+    checked a day at a time, so where a month has day rows they are what
+    answers.
+
+    A DAY WORKED IS 'PRESENT' *OR* 'OUT DOOR DUTY'. Not PRESENT on its own: a
+    service engineer spends the day at a customer's site, so HR marks him OUT
+    DOOR DUTY and leaves PRESENT at zero — across the 94 service-engineer rows
+    in the July file PRESENT holds 500 days and OUT DOOR DUTY holds 1,870.
+    Reading PRESENT alone reports a working engineer as never having turned up,
+    and then divides his SRs by nothing. Each person uses one column or the
+    other, so the two add without double-counting. c_off, leave, absent,
+    weekly_off and holiday are days NOT worked and none of them belongs here.
+
+    A HALF DAY IS HALF A DAY, AND THE SUMMARY COLUMN IS ALREADY HALVED. On all
+    142 rows of the July file the summary's HALF DAY equals the number of half
+    days times 0.5, while its PRESENT is the plain count of 'Present' cells and
+    does not include the worked half. So the column is added AS IT STANDS —
+    multiplying it by 0.5 again, which this function used to do, paid a half day
+    a quarter of a day. (It is also why the nine count columns add up to Total
+    Days Month on 126 of the 142 rows and not all of them: the sixteen that
+    fall short are exactly the sixteen with a half day.)
+
+    THE FIGURE IS SHARED, so the rule is in ONE place: SE Performance and
+    Employee Productivity's 'HR wise attendance' column are the same days off
+    the same file and must never disagree. Each passes its own
+    `resolve(e_code, uid, name)` — see _se_performance_attendance — and gets
+    a map keyed by whatever that returns.
+
+    Returns ({who: {'YYYY-MM': days present}}, [the months HR has uploaded],
+             {who: {'YYYY-MM': day codes}}).
+    A month HR has not uploaded is ABSENT from an engineer's map, and the page
+    prints a dash for it: attendance nobody has told us about is not 0 days
+    present, and an engineer must never be marked absent by a missing file.
+    """
+    from app.models.pms_model import PmsAttendanceSummary
+
+    def _worked(r):
+        return ((r.present or 0) + (r.out_door_duty or 0) + (r.half_day or 0))
+
+    per, months = {}, set()
+    for r in db.query(PmsAttendanceSummary).all():
+        month = (r.period_month or "").strip()
+        if len(month) != 7:
+            continue
+        months.add(month)
+        if r.present is None and r.out_door_duty is None:
+            continue
+        who = resolve(r.e_code, r.uid, r.name_key or r.employee_name)
+        if who is None:
+            continue
+        # one row per employee per month is the file's own upsert key, so a
+        # second row for the same month is a correction and the larger figure
+        # is not automatically the right one — the last read wins, as with
+        # every other master here
+        per.setdefault(who, {})[month] = round(_worked(r), 2)
+
+    # and the day-wise file wins wherever it has been uploaded
+    day_codes, day_worked, day_months = _se_performance_attendance(db, resolve)
+    months.update(day_months)
+    for who, per_month in day_worked.items():
+        per.setdefault(who, {}).update(per_month)
+    return per, sorted(months), day_codes
+
+
+_EFSR_DT_FORMATS = ("%m/%d/%Y, %I:%M %p", "%m/%d/%Y %I:%M %p",
+                    "%m/%d/%Y, %H:%M", "%m/%d/%Y")
+
+
+def _efsr_dt(value):
+    """One of the EFSR file's date-and-time strings -> datetime, or None.
+
+    The file writes US order with a 12-hour clock — '5/21/2026, 3:48 PM' — and
+    these columns are DYNAMIC, so they arrive as the raw text the export put in
+    them rather than as a parsed column. Where the first component is above 12
+    the order is unambiguous; where it is not, US order is still assumed,
+    because every unambiguous row in the file is in US order and a file does
+    not change convention halfway down.
+    """
+    if not value:
+        return None
+    t = str(value).strip()
+    for f in _EFSR_DT_FORMATS:
+        try:
+            return datetime.strptime(t, f)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _se_performance_leads_battery(db: Session, people):
+    """AMC LEADS and BATTERY SELL per engineer per day — and they come from two
+    DIFFERENT files, because they are two different kinds of fact.
+
+    ---- AMC LEAD GENERATION ------------------------------------------------
+    A LEAD, so it comes from the LMS file, exactly as Employee Productivity
+    takes its lead columns: the row's LEAD RAISED FOR is mapped through the
+    LEAD CATEGORY MASTER (pms_lead_raised_for_map) and the ones landing on
+    'AMC' are counted — on this data that is the single value 'Service
+    AMC/Bandhan/Anubandhan'. Counted ONCE PER LEAD NUMBER, on LEAD CREATED
+    DATE, and attributed by SERVICE ENGINEER UID through the SE UID Master —
+    never by name. Reading the master rather than hard-coding the value means
+    re-heading 'Lead Raised For' in the AOP Master moves this figure with it.
+    Attribution is near-complete: 169 of the file's 174 AMC leads carry a UID
+    the master knows.
+
+    ---- BATTERY SELL -------------------------------------------------------
+    A SALE, and the commitment says SELL, so it does NOT come from the leads.
+    It comes from the PART SALE records (pms_sales_records, record_type
+    'part'), where PART CATEGORY is 'Battery': the QUANTITY is summed — three
+    batteries is three batteries, not three invoice lines — on CLAIM INVOICE
+    DATE, with cancelled rows excluded. Attributed on that file's own SE NAME,
+    letters-only, because it carries no UID.
+
+    THE ALTERNATIVE WAS MEASURED AND REJECTED. 'Converted battery leads' is
+    what the commitment's own hint suggested, and it does not work: of 207
+    battery leads only 14 have an order in 'LMS Data from Insia' at all, and
+    only FOUR are both converted and attributable to an engineer — three
+    months' worth of data would score the entire roster at zero. The part-sale
+    file has 109 battery lines carrying 133 batteries, 82 of them named to an
+    engineer, spread across every month. It is the file that knows about sales.
+
+    Returns {uid: {iso date: [amc leads, batteries]}}.
+    """
+    from app.models.customer_model import LMSData
+
+    # ---- the Lead Category Master decides what 'AMC' means ---------------
+    amc_raised = {_tight(m.lead_raised_for) for m in db.query(PmsLeadRaisedForMap).all()
+                  if _tight(m.category) == "AMC" and m.lead_raised_for}
+
+    by_uid = {p["uid"].strip().upper(): p["uid"] for p in people.values()}
+    own_of_uid = {}
+    for m in db.query(PmsSeUid).all():
+        for u in _uid_list(m.se_uid):
+            k = u.strip().upper()
+            if k in by_uid:
+                own_of_uid[k] = by_uid[k]
+    # and the letters-only name, for the part file which has no UID
+    own_of_name = {}
+    for m in db.query(PmsSeUid).all():
+        t = _tight(m.name_key or m.se_name)
+        own = next((by_uid[u.strip().upper()] for u in _uid_list(m.se_uid)
+                    if u.strip().upper() in by_uid), None)
+        if t and own:
+            own_of_name.setdefault(t, own)
+    for p in people.values():
+        own_of_name.setdefault(_tight(p["name"]), p["uid"])
+
+    out = {}
+
+    def _add(own, iso, slot, n):
+        row = out.setdefault(own, {}).setdefault(iso, [0, 0])
+        row[slot] += n
+
+    # ---- AMC leads --------------------------------------------------------
+    seen = set()
+    amc_meta = [0, 0]
+    if amc_raised:
+        for lead_no, uid, raised, created in (
+                db.query(LMSData.lead_number, LMSData.service_engineer_uid,
+                         LMSData.lead_raised_for, LMSData.lead_created_date)
+                .filter(LMSData.lead_created_date.isnot(None)).all()):
+            if _tight(raised) not in amc_raised:
+                continue
+            key = (lead_no or "").strip().upper()
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            amc_meta[0] += 1
+            own = own_of_uid.get((uid or "").strip().upper())
+            if own is None:
+                continue
+            amc_meta[1] += 1
+            d = created.date() if isinstance(created, datetime) else created
+            _add(own, d.isoformat(), 0, 1)
+
+    # ---- batteries sold ---------------------------------------------------
+    batt_meta = [0, 0]
+    for qty, dt_, extra in (
+            db.query(PmsSalesRecord.quantity, PmsSalesRecord.claim_invoice_date,
+                     PmsSalesRecord.extra_data)
+            .filter(PmsSalesRecord.record_type == "part",
+                    PmsSalesRecord.part_category == "Battery",
+                    PmsSalesRecord.is_cancelled == False,          # noqa: E712
+                    PmsSalesRecord.claim_invoice_date.isnot(None)).all()):
+        n = float(qty or 0)
+        if n <= 0:
+            continue
+        batt_meta[0] += 1
+        se = ""
+        if extra:
+            try:
+                for k, v in (json.loads(extra) or {}).items():
+                    if _tight(k) == "SENAME":
+                        se = str(v or "")
+                        break
+            except Exception:
+                se = ""
+        own = own_of_name.get(_tight(se))
+        if own is None:
+            continue
+        batt_meta[1] += 1
+        d = dt_.date() if isinstance(dt_, datetime) else dt_
+        _add(own, d.isoformat(), 1, n)
+
+    # WHICH MONTHS EACH SOURCE CAN ACTUALLY SPEAK FOR.
+    # A month with no attributable record is not a month of zeroes: August 2026
+    # has fifteen battery lines carrying twenty-one batteries and EVERY ONE of
+    # them has a blank SE NAME, so the file knows the sale happened and does not
+    # know who made it. Scoring the whole roster 0 of 3 on that would be the
+    # missing-file-marks-a-man-down fault again, so the months are returned and
+    # the report prints a dash outside them — the same treatment HR's
+    # attendance_months gets.
+    amc_months, batt_months = set(), set()
+    for days in out.values():
+        for iso, (a, b) in days.items():
+            if a:
+                amc_months.add(iso[:7])
+            if b:
+                batt_months.add(iso[:7])
+    return out, {"engineers": len(out),
+                 "amc_leads": amc_meta[0], "amc_attributed": amc_meta[1],
+                 "battery_lines": batt_meta[0], "battery_attributed": batt_meta[1],
+                 "amc_months": sorted(amc_months),
+                 "battery_months": sorted(batt_months)}
+
+
+def _se_performance_efsr(db: Session, people):
+    """FIRST SITE BEFORE 10:00 and SALESFORCE TASK CLOSURE, from the EFSR file.
+
+    Matched on SERVICE ENGINEER UID — the EFSR export carries one, so this is
+    the strong join, not the name match the CDI file forces.
+
+    FIRST SITE BEFORE 10:00 asks a question about a DAY, not about a task: of
+    the days he worked, on how many did he start his FIRST job before ten. So
+    the earliest TASK START DATE of each day is taken and compared with 10:00,
+    and the metric is on-time days over days worked. Counting tasks instead
+    would answer a different question and answer it badly — only 4% of all
+    tasks in the file start before ten, because most of an engineer's day is
+    the jobs after his first.
+
+    NOTE ON THE COLUMN: 'Task Start Date' is the business's instruction and is
+    what is used. The file also has 'SR Reach at Site Date & Time', which is
+    on 89% of rows against Task Start Date's 78% and is literally the moment he
+    REPORTED at the site — arguably closer to the wording of the commitment. It
+    is used only as a fallback for the day's first task where Task Start Date is
+    blank, so a day is not called late because a column was empty. Say the word
+    and the primary swaps in one line.
+
+    SALESFORCE TASK CLOSURE DAILY is committed as 'Before Leaving Site', so it
+    is measured as SAME-DAY closure: of the tasks with both a visit and a task
+    end, the share whose TASK END DATE falls on the visit's own date. Measured
+    on the whole file, 8,593 of 9,307 (92%) — a discipline figure that can
+    plausibly fall short, which is what a commitment needs. TASK STATUS
+    ('Completed', 76%) and PDF GENERATED ('Yes', 76%) were the alternatives and
+    were rejected: both say whether the task was closed AT ALL, and the word in
+    the commitment is DAILY.
+
+    Returns ({uid: {iso visit date: [first-site on time 0/1, days 0/1,
+                                     closed same day, tasks, first-start mins]}},
+             {uid: {iso TASK END date: closed SRs}},
+             {uid: {iso TASK ASSIGNED date: [allocated, closed that same day]}},
+             meta).
+    """
+    from app.models.customer_model import EFSRReport
+
+    by_uid = {p["uid"].strip().upper(): p["uid"] for p in people.values()}
+    own_of = {}
+    for m in db.query(PmsSeUid).all():
+        for u in _uid_list(m.se_uid):
+            k = u.strip().upper()
+            if k in by_uid:
+                own_of[k] = by_uid[k]
+
+    rows = (db.query(EFSRReport.service_engineer_uid, EFSRReport.task_end_date,
+                     EFSRReport.task_assigned_date, EFSRReport.extra_data)
+            .filter(EFSRReport.service_engineer_uid.isnot(None),
+                    EFSRReport.service_engineer_uid != "")
+            .all())
+
+    # uid -> iso day -> [earliest start, closed-same-day count, task count]
+    day = {}
+    # and SR CLOSED, keyed on the TASK END DATE — a different date from the
+    # visit above, so it cannot share that map
+    closed = {}
+    # and ALLOCATED, on the TASK ASSIGNED DATE — the other half of the SR
+    # Allocation report's pair. An SR normally counts in both, on the day it was
+    # given to him and again on the day he finished it, and the two differ by
+    # the ones assigned in the period but finished outside it (or not at all).
+    alloc = {}
+    for uid, te, ta, extra in rows:
+        own = own_of.get((uid or "").strip().upper()) or by_uid.get((uid or "").strip().upper())
+        if own is None:
+            continue
+        d = {}
+        if extra:
+            try:
+                d = json.loads(extra) or {}
+            except Exception:
+                d = {}
+        # ---- SR CLOSED, counted EXACTLY as the SR Allocation report counts a
+        # closure: one row per SERVICE ENGINEER UID with a TASK END DATE, on
+        # that date. One EFSR row is one appointment — one dispatch of one
+        # engineer to one job — and TASK END DATE is when he finished it. NOT
+        # SR CLOSED DATE, which is the back-office closure days later, and not
+        # the MaxTTR count either: the two files disagree, and the business's
+        # SR Count commitment is the EFSR one.
+        if te is not None:
+            ted = te.date() if isinstance(te, datetime) else te
+            cd = closed.setdefault(own, {})
+            k = ted.isoformat()
+            cd[k] = cd.get(k, 0) + 1
+        if ta is not None:
+            tad = ta.date() if isinstance(ta, datetime) else ta
+            ad = alloc.setdefault(own, {})
+            k = tad.isoformat()
+            slot = ad.setdefault(k, [0, 0])
+            slot[0] += 1
+            # ---- CLOSED ON THE DAY IT WAS ALLOCATED ----------------------
+            # The pair the commitment is really about. Counting allocations on
+            # one date and closures on another and dividing them compares two
+            # different sets of SRs: one given out on the 1st and finished on
+            # the 5th makes the 1st read 0% and the 5th read 200%, which is
+            # what the day columns did. Both halves of THIS ratio are the same
+            # appointments, so it is a real proportion and can never exceed
+            # 100% — 'Before Leaving Site', measured.
+            if te is not None:
+                ted2 = te.date() if isinstance(te, datetime) else te
+                if ted2 == tad:
+                    slot[1] += 1
+
+        start = _efsr_dt(d.get("Task Start Date"))
+        reach = _efsr_dt(d.get("SR Reach at Site Date & Time"))
+        visit = start or reach
+        if visit is None:
+            continue
+        iso = visit.date().isoformat()
+        slot = day.setdefault(own, {}).setdefault(iso, [None, 0, 0])
+        if slot[0] is None or visit < slot[0]:
+            slot[0] = visit
+        if te is not None:
+            end = te.date() if isinstance(te, datetime) else te
+            slot[2] += 1
+            if end == visit.date():
+                slot[1] += 1
+
+    out = {}
+    for own, days in day.items():
+        for iso, (first, ok, n) in days.items():
+            on_time = 1 if (first is not None and first.hour < 10) else 0
+            # the minute of the day he started, so the report can print his
+            # AVERAGE first-site time beside the percentage instead of the
+            # invented one it used to
+            mins = (first.hour * 60 + first.minute) if first is not None else 0
+            out.setdefault(own, {})[iso] = [on_time, 1, ok, n, mins]
+    return out, closed, alloc, {
+        "engineers": len(out), "closed_engineers": len(closed),
+        "closed_srs": sum(sum(d.values()) for d in closed.values()),
+        "allocated_srs": sum(v[0] for d in alloc.values() for v in d.values()),
+        "closed_same_day": sum(v[1] for d in alloc.values() for v in d.values())}
+
+
+def _se_performance_cdi(db: Session, people):
+    """CDI feedback per engineer per day — Employee Productivity's CDI columns.
+
+    THE SAME RULES AS THAT REPORT. The CDI Detail Report is the source, rows
+    are counted on ACTIVITY END DATE, and each one falls in one of three
+    buckets read off the LEADING WORD of its CDI CATEGORY (so the score range
+    in brackets can change without breaking the read) — Promotor, Detractor,
+    anything else Passive. The report's figure is then
+
+        CDI % = (Promotor - Detractor) / all feedback x 100
+
+    which is a net-promoter reading and NOT a rating out of ten.
+
+    MATCHED ON THE TECHNICIAN'S NAME, letters-only, because that file has no
+    UID — X TECHNICIAN NAME is all it carries. That is EP's join too. It is a
+    weaker identity than the UID the SR counts use, and it is accepted here for
+    the same reason EP accepts it: a customer's feedback is attached to a
+    person by name at the point of capture, and there is nothing else to join
+    on. Two engineers who share a squashed name would share their feedback.
+
+    Returns {uid: {iso date: [promotor, detractor, passive]}}.
+    """
+    from app.models.customer_model import CDIDetailReport
+
+    uids_of_tight = {}
+    for m in db.query(PmsSeUid).all():
+        t = _tight(m.name_key or m.se_name)
+        if not t:
+            continue
+        for u in _uid_list(m.se_uid):
+            uids_of_tight.setdefault(t, []).append(u.strip().upper())
+
+    by_uid = {p["uid"].strip().upper(): p["uid"] for p in people.values()}
+    by_name = {}
+    for p in people.values():
+        by_name.setdefault(_tight(p["name"]), p["uid"])
+
+    rows = (db.query(CDIDetailReport.x_technician_name,
+                     cast(CDIDetailReport.activity_end_date, Date),
+                     CDIDetailReport.cdi_category)
+            .filter(CDIDetailReport.x_technician_name.isnot(None),
+                    CDIDetailReport.x_technician_name != "",
+                    CDIDetailReport.activity_end_date.isnot(None))
+            .all())
+
+    per, unmatched = {}, 0
+    for name, d, cat in rows:
+        t = _tight(name)
+        uid = next((by_uid[u] for u in uids_of_tight.get(t, []) if u in by_uid),
+                   None) or by_name.get(t)
+        if uid is None:
+            unmatched += 1
+            continue
+        slot = per.setdefault(uid, {}).setdefault(d.isoformat(), [0, 0, 0])
+        slot[_cdi_bucket(cat)] += 1
+    return per, {"engineers": len(per), "unmatched_rows": unmatched}
+
+
+def _se_performance_conversions(db: Session, people):
+    """SPARE and LABOUR CONVERSION AMOUNTS per engineer per month — Employee
+    Productivity's 'Spare Conv. Amount' and 'Labour Conv. Amount' columns.
+
+    THE SAME RULES AS THAT REPORT, restated here rather than shared, because
+    EP's version is woven into its own employee indexing and its per-branch
+    'Other' stream and must not be disturbed. Every rule below is EP's:
+
+      SOURCE      the LMS file's PART INVOICE AMOUNT (spare) and LABOUR
+                  INVOICE AMOUNT (labour), one lead counted once — a repeated
+                  LEAD NUMBER is the same lead.
+      ATTRIBUTED  by SERVICE ENGINEER UID through the SE UID MASTER, and by
+                  nothing else. LMS rows are never matched on name: a lead is
+                  money, and money must not land on an engineer because two
+                  people are spelt alike.
+      DATED       on the ORDER's own creation date, NOT the lead's. That date
+                  exists only in 'LMS Data from Insia' (lms_insia) and is
+                  looked up per LEAD NUMBER. A lead with no order there, or one
+                  whose ORDER CREATION DATE was blank / '0' / 'N/A' and parsed
+                  to NULL at import, converted to nothing and is skipped.
+      OTC OUT     a lead whose LMS QUOTATION TYPE is 'OTC Quotation' is an
+                  over-the-counter sale, not this engineer's conversion, so it
+                  is out of SPARE. Labour is unaffected.
+
+    What is NOT brought over is EP's 'Other' pair of columns — the conversions
+    whose lead carries no UID, or a UID the master does not know. Those belong
+    to a BRANCH and to no engineer, and this report has no branch row to put
+    them on; the total is returned as meta so it is visible rather than silently
+    dropped, because on real data it is most of the money.
+
+    Returns ({uid: {iso ORDER date: [spare, labour]}}, meta).
+    """
+    from app.models.customer_model import LMSData, LMSInsia
+
+    # ---- the ORDER's creation date, per lead ------------------------------
+    order_date_of = {}
+    for lead_no, ordered in (db.query(LMSInsia.lead_number,
+                                      LMSInsia.order_creation_date)
+                             .filter(LMSInsia.lead_number.isnot(None),
+                                     LMSInsia.order_creation_date.isnot(None))
+                             .all()):
+        okey = (lead_no or "").strip().upper()
+        if okey and okey not in order_date_of:
+            order_date_of[okey] = (ordered.date() if isinstance(ordered, datetime)
+                                   else ordered)
+
+    # ---- UID -> our engineer, via the SE UID master ONLY ------------------
+    by_uid = {p["uid"].strip().upper(): p["uid"] for p in people.values()}
+    master_uid = {}                      # a master UID -> the roster's own uid
+    for m in db.query(PmsSeUid).all():
+        t = _tight(m.name_key or m.se_name)
+        own = next((by_uid[u.strip().upper()] for u in _uid_list(m.se_uid)
+                    if u.strip().upper() in by_uid), None)
+        if own is None:
+            # the master row itself is not on this roster; it can still carry
+            # the UID of somebody who is, matched on the squashed name
+            own = next((p["uid"] for p in people.values()
+                        if _tight(p["name"]) == t), None)
+        if own is None:
+            continue
+        for u in _uid_list(m.se_uid):
+            master_uid.setdefault(u.strip().upper(), own)
+
+    rows = (db.query(LMSData.lead_number, LMSData.service_engineer_uid,
+                     LMSData.part_invoice_amount, LMSData.labour_invoice_amount,
+                     LMSData.quotation_type)
+            .all())
+
+    per, seen = {}, set()
+    unattributed = [0.0, 0.0]
+    no_order = 0
+    for i, (lead_no, uid, part_amt, lab_amt, qtype) in enumerate(rows):
+        lkey = (lead_no or "").strip().upper() or f"#row{i}"
+        if lkey in seen:
+            continue
+        seen.add(lkey)
+
+        od = order_date_of.get(lkey)
+        if od is None:
+            no_order += 1
+            continue
+        spare = 0.0 if _tight(qtype) == "OTCQUOTATION" else _parse_amount(part_amt)
+        labour = _parse_amount(lab_amt)
+        if not spare and not labour:
+            continue
+
+        own = master_uid.get((uid or "").strip().upper())
+        if own is None:
+            unattributed[0] += spare
+            unattributed[1] += labour
+            continue
+        # keyed on the ORDER's own DAY, not its month: the report's day and week
+        # columns then read the same figures the month and year columns do,
+        # instead of a month's total spread over its days
+        slot = per.setdefault(own, {}).setdefault(od.isoformat(), [0.0, 0.0])
+        slot[0] += spare
+        slot[1] += labour
+
+    for m in per.values():
+        for k, v in m.items():
+            m[k] = [round(v[0], 2), round(v[1], 2)]
+    return per, {
+        "engineers": len(per),
+        "leads_without_order": no_order,
+        "unattributed_spare": round(unattributed[0], 2),
+        "unattributed_labour": round(unattributed[1], 2),
+    }
+
+
+def _se_performance_task_end_days(db: Session, people):
+    """DAYS PRESENT ON TASK END per engineer per month — Employee Productivity's
+    third day figure, counted its way.
+
+    DISTINCT SR TASK END DATEs out of the MaxTTR file, never SR CLOSE DATE. The
+    close date is an OFFICE event: the SR is closed in the system, often days
+    later and in a batch. The task end date is when the engineer actually
+    finished the job in the field, so it is the honest marker of a day he was
+    out working. A day he ended at least one task is one day, however many he
+    ended.
+
+    Joined by SE NAME through the SE UID master, exactly as the SR counts are —
+    the MaxTTR file has no UID. Returns {uid: {'YYYY-MM': distinct days}}.
+    """
+    from app.models.customer_model import ResponseTimeMaxTTR
+
+    uids_of_tight = {}
+    for m in db.query(PmsSeUid).all():
+        t = _tight(m.name_key or m.se_name)
+        if not t:
+            continue
+        for u in _uid_list(m.se_uid):
+            uids_of_tight.setdefault(t, []).append(u.strip().upper())
+
+    by_uid = {p["uid"].strip().upper(): p["uid"] for p in people.values()}
+    by_name = {}
+    for p in people.values():
+        by_name.setdefault(_tight(p["name"]), p["uid"])
+
+    rows = (db.query(ResponseTimeMaxTTR.se_name,
+                     cast(ResponseTimeMaxTTR.sr_task_end_date, Date))
+            .filter(ResponseTimeMaxTTR.sr_task_end_date.isnot(None),
+                    ResponseTimeMaxTTR.se_name.isnot(None),
+                    ResponseTimeMaxTTR.se_name != "")
+            .distinct().all())
+
+    per = {}
+    for name, d in rows:
+        t = _tight(name)
+        uid = next((by_uid[u] for u in uids_of_tight.get(t, []) if u in by_uid),
+                   None) or by_name.get(t)
+        if uid is None:
+            continue
+        # DISTINCT is already done in SQL, so each row is one day
+        month = d.isoformat()[:7]
+        per.setdefault(uid, {})
+        per[uid][month] = per[uid].get(month, 0) + 1
+    return per
+
+
+def _sr_pairs(days, base):
+    """{iso: n} -> [[days since base, n], ...], oldest first. None stays None:
+    an engineer with no row in the file is not an engineer with no SRs."""
+    if not days:
+        return None
+    b = date.fromisoformat(base)
+    return sorted([(date.fromisoformat(k) - b).days, v] for k, v in days.items())
+
+
+def _se_performance_sr_days(db: Session, people):
+    """Day-wise SR CLOSED per engineer, counted exactly as EMPLOYEE
+    PRODUCTIVITY counts it, and attributed to the SE Performance roster.
+
+    THE SAME SOURCE AND THE SAME RULE as that report: every row of the
+    'Response Time & MaxTTR Details' import (response_time_maxttr, where SR
+    NUMBER is unique) that has an SR CLOSE DATE and an SE NAME counts once for
+    that engineer on that date. Not the labour file — an SR counts because the
+    engineer closed it, not because it was billed. Grouped in SQL, so 45k rows
+    come back as 22k (engineer, day) totals.
+
+    THE JOIN is where the two reports differ, and it cannot be otherwise: the
+    MaxTTR file carries only an SE NAME, while this roster is keyed on the
+    Training Report's UID NO. So the name goes through the SE UID MASTER —
+    letters-only name -> UID -> the engineer holding that UID — which is the
+    same master, and the same squashed-name rule, Employee Productivity uses to
+    put a UID on its own rows. Only where the master has no UID for a name does
+    it fall back to matching that name against the roster's own, and never
+    against anything else: a name matched loosely is one engineer's work landing
+    on another engineer's report.
+
+    Returns ({uid: {iso date: count}}, meta). An engineer the file has never
+    named is ABSENT from the mapping rather than present with a zero — 'he
+    closed nothing' and 'this file has never heard of him' are not the same
+    statement, and the page prints a dash for the second.
+    """
+    from app.models.customer_model import ResponseTimeMaxTTR
+
+    # tight SE name -> the UIDs the master gives it
+    uids_of_tight = {}
+    for m in db.query(PmsSeUid).all():
+        t = _tight(m.name_key or m.se_name)
+        if not t:
+            continue
+        for u in _uid_list(m.se_uid):
+            uids_of_tight.setdefault(t, []).append(u.strip().upper())
+
+    by_uid = {p["uid"].strip().upper(): p["uid"] for p in people.values()}
+    by_name = {}
+    for p in people.values():
+        by_name.setdefault(_tight(p["name"]), p["uid"])
+
+    rows = (db.query(ResponseTimeMaxTTR.se_name,
+                     cast(ResponseTimeMaxTTR.sr_close_date, Date).label("d"),
+                     func.count(ResponseTimeMaxTTR.id))
+            .filter(ResponseTimeMaxTTR.sr_close_date.isnot(None),
+                    ResponseTimeMaxTTR.se_name.isnot(None),
+                    ResponseTimeMaxTTR.se_name != "")
+            .group_by(ResponseTimeMaxTTR.se_name,
+                      cast(ResponseTimeMaxTTR.sr_close_date, Date))
+            .all())
+
+    per, unmatched = {}, {}
+    lo = hi = None
+    for name, d, n in rows:
+        t = _tight(name)
+        uid = next((by_uid[u] for u in uids_of_tight.get(t, []) if u in by_uid),
+                   None) or by_name.get(t)
+        if uid is None:
+            unmatched[str(name).strip()] = unmatched.get(str(name).strip(), 0) + int(n)
+            continue
+        iso = d.isoformat()
+        day = per.setdefault(uid, {})
+        day[iso] = day.get(iso, 0) + int(n)
+        if lo is None or iso < lo:
+            lo = iso
+        if hi is None or iso > hi:
+            hi = iso
+
+    return per, {
+        "from": lo, "to": hi,
+        "engineers": len(per),
+        "unmatched_names": len(unmatched),
+        "unmatched_srs": sum(unmatched.values()),
+    }
 
 
 def se_performance_roster(db: Session):
-    """The SE Performance report's roster — REAL branches and REAL engineers.
+    """Cached wrapper — see _se_performance_roster."""
+    return _cached(db, ("se_perf_roster",), lambda: _se_performance_roster(db))
 
-    Branches are the AOP master's plus the static ERP list (the same set the SE
-    UID Master pins an engineer to), each carrying its region so the report can
-    split MH from KA. Engineers come from the SE UID MASTER itself, because that
-    is where the business maintains the roster; a row with no branch pinned is
-    skipped, since every row of the report has to sit under a branch.
 
-    Alongside each engineer this also returns what the TRAINING REPORT already
-    knows about him — employee ticket number, hire date, and the skills he has
-    been through with their dates. That is master data the business has
-    uploaded, not a counted figure, so the report shows it as it stands.
+def _se_performance_roster(db: Session):
+    """The SE Performance report's roster — REAL branches and REAL engineers,
+    read from the TRAINING REPORT.
 
-    EVERY OTHER FIGURE ON THE PAGE IS GENERATED CLIENT-SIDE FOR NOW. The
-    counting rules for the twelve commitments are not agreed yet, so nothing
-    here touches an import table; when they are, this is the function that grows
-    them and the front end stops generating.
+    The Training Report is this page's roster of record. Everybody in that file
+    is a service engineer (its JOB TITLE column only ever reads 'Service
+    Engineer — Mechanical / Electrical / Trainee'), and the file already
+    carries, per person, the UID NO the whole PMS identifies an engineer by,
+    plus the branch, the job title, the hire date and every skill they have
+    been through. So the roster is taken from there whole, instead of from the
+    SE UID Master, which knows only a name, a UID and a branch.
+
+    The EMPLOYEE ID is the one thing NOT taken from that file. The training
+    file's EMPLOYEE TICKET NUMBER is KOEL's own 12-digit reference and not the
+    code anybody here uses, so the employee code is resolved the way the SE UID
+    Master resolves it — out of HR's Attendance Summary, by UID and then by name
+    (see se_uid_employee_codes). The ticket number still travels as `ticket`.
+
+    ONLY ACTIVE ENGINEERS ARE RETURNED. A leaver's training rows are never
+    deleted — the training history has to survive the exit — so the STATUS is
+    the only thing that marks them, and the manually typed status (Training
+    Report -> open an employee -> Employment status) OVERRIDES the file's own
+    CURRENT STATUS column, exactly as it does on that page.
+
+    Branches carry their region so the report can split MH from KA, and take
+    the master's SHORT name ('Ch.Sambhaji Nagar') over the training file's
+    legal one ('KALA Care Global LLP - Aurangabad'), which is what every other
+    PMS report prints. A branch the training file uses but no master lists
+    still comes through — dropping it would drop its engineers with it.
+
+    EVERY COMMITMENT FIGURE ON THE PAGE IS STILL GENERATED CLIENT-SIDE. The
+    counting rules for the commitments are not agreed yet, so nothing
+    here touches a transaction table; when they are, this is the function that
+    grows them and the front end stops generating.
     """
-    from app.models.pms_model import PmsTrainingRecord
+    from app.models.pms_model import PmsTrainingRecord, PmsTrainingStatusOverride
 
+    # ---- region and branch NAME per branch id -----------------------------
     regions = {b: r for r, b, _n in ERP_BRANCHES}
     for bid, reg in (db.query(PmsBranchTarget.branch_id, PmsBranchTarget.region)
                      .distinct().all()):
         b = _norm_branch_id(bid)
         if b and (reg or "").strip():
             regions[b] = reg.strip().upper()
+    names = {b["branch_id"]: b["branch_name"] for b in se_uid_branches(db)}
 
-    branches = [dict(b, region=regions.get(b["branch_id"], "MH"))
-                for b in se_uid_branches(db)]
-    known = {b["branch_id"] for b in branches}
-
-    # ---- what the Training Report knows, keyed STRICTLY BY UID ------------
-    # NOTE: the EMPLOYEE CODE is deliberately NOT taken from here. The Training
-    # Report's EMPLOYEE TICKET NUMBER is that file's own reference and the
-    # business does not recognise it as the engineer's employee code, so
-    # printing it on a performance report put a number on the page that reads
-    # as an id but is not the one anybody uses. The report shows a dash instead.
-    # When the SE UID Master gains an employee-code column, read it there and
-    # set `code` from it — that is the only change needed.
-    # It was also matching on letters-only name, to fill in engineers whose SE
-    # UID Master row has no UID yet. That is how one man's employee ticket
-    # number lands on another man's report: two engineers share a name, or a
-    # name is spelled the same in two files, and the report then shows a real
-    # number that belongs to somebody else. A UID is the identity here; where
-    # there is none, the report shows a dash and the SE UID Master is the place
-    # to fix it.
-    hired, trainings = {}, {}
-
-    for r in db.query(PmsTrainingRecord).all():
+    # ---- one record per PERSON, out of the training master -----------------
+    # The file's grain is (engineer, skill, training): the same person repeats
+    # once per skill, and once more for the same skill re-taken under another
+    # category. UID NO is the identity — a row without one cannot be attributed
+    # to anybody, so it is skipped rather than guessed at by name.
+    people = {}
+    for r in (db.query(PmsTrainingRecord)
+              .order_by(PmsTrainingRecord.full_name, PmsTrainingRecord.id).all()):
         uid = (r.uid_no or "").strip()
         if not uid:
             continue
-        if r.hire_date and uid not in hired:
-            hired[uid] = r.hire_date.isoformat()
-        skill = (r.skill or "").strip()
-        if not skill:
-            continue
+        p = people.get(uid)
+        if p is None:
+            p = people[uid] = {
+                "uid": uid, "name": (r.full_name or "").strip(),
+                "code": "", "ticket": "", "branch_id": "", "file_branch": "",
+                "occupation": "", "title": "", "hired": "",
+                "file_status": "", "_tr": [],
+            }
+        # The identity columns describe the PERSON and the file repeats them on
+        # every one of their rows; later rows only FILL BLANKS (the ticket
+        # number sits on the training rows, not on an untrained engineer's).
+        if not p["ticket"] and r.employee_ticket_number:
+            p["ticket"] = r.employee_ticket_number.strip()
+        if not p["branch_id"]:
+            p["branch_id"] = _norm_branch_id(r.branch_id or "")
+        if not p["file_branch"] and r.branch_name:
+            p["file_branch"] = r.branch_name.strip()
+        if not p["occupation"] and r.occupation:
+            p["occupation"] = r.occupation.strip()
+        if not p["hired"] and r.hire_date:
+            p["hired"] = r.hire_date.isoformat()
+        # Should an engineer's rows disagree — a leaver whose older training
+        # rows still read Active — 'Inactive' WINS. The point of the column is
+        # to spot who has gone, and a stale Active row must not hide it.
+        if r.current_status == "Inactive":
+            p["file_status"] = "Inactive"
+        elif not p["file_status"] and r.current_status:
+            p["file_status"] = r.current_status
+
+        # JOB TITLE, CATEGORY and TRAINING DATE live in extra_data (they are
+        # dynamic columns), so they are read by flexible header match. The
+        # skeleton _tight() returns is UPPER CASE — comparing it against a
+        # lower-case literal matches nothing at all, which is how the category
+        # and the date on every training silently came through blank.
         extra = {}
         if r.extra_data:
             try:
                 extra = json.loads(r.extra_data) or {}
             except Exception:
                 extra = {}
-        cat = date = ""
+        cat = tdate = ""
         for k, v in extra.items():
             kk = _tight(k)
-            if kk == "category" and not cat:
+            if kk == "JOBTITLE" and not p["title"]:
+                p["title"] = str(v or "").strip()
+            elif kk == "CATEGORY" and not cat:
                 cat = str(v or "").strip()
-            elif kk == "trainingdate" and not date:
-                date = str(v or "").strip()[:10]
-        trainings.setdefault(uid, {})
-        cur = trainings[uid].get(skill)
-        if cur is None:
-            trainings[uid][skill] = {"cats": [cat] if cat else [], "date": date}
+            elif kk.startswith("TRAININGDATE") and not tdate:
+                tdate = str(v or "").strip()[:10]
+        # ONE ENTRY PER TRAINING ROW, which is the Training Report's own grain
+        # and therefore its own count. Collapsing by SKILL was wrong: that file
+        # records a re-take under another CATEGORY as its own row, so a man the
+        # Training Report page lists eight trainings for was reported here as
+        # six — measured, 58 of 119 engineers disagreed. The record key is
+        # UID + SKILL + TRAINING DATE + CATEGORY, so the rows are already
+        # unique and nothing needs collapsing.
+        skill = (r.skill or "").strip()
+        if skill:
+            p["_tr"].append([skill, cat, tdate])
+
+    # ---- the typed status wins over the file -------------------------------
+    # One query for the lot: that table holds one row per engineer HR has told
+    # us about, which is a handful next to the training master.
+    overrides = {o.uid_no: o for o in db.query(PmsTrainingStatusOverride).all()}
+    for uid, p in people.items():
+        o = overrides.get(uid)
+        p["status"] = (o.status if o is not None else p["file_status"])
+        p["status_source"] = ("manual" if o is not None
+                              else ("file" if p["file_status"] else ""))
+        p["left_on"] = (o.left_on.isoformat()
+                        if (o is not None and o.left_on) else "")
+
+    # ---- HR's EMPLOYEE CODE ------------------------------------------------
+    # The employee id the business uses, the one the SE UID Master shows: it
+    # comes off HR's Attendance Summary, not out of the training file. The
+    # training file's own EMPLOYEE TICKET NUMBER is kept as `ticket` — it is a
+    # KOEL reference, not an employee code, and the report does not print it as
+    # one. An engineer HR has not named yet carries a blank, and the page shows
+    # a dash rather than a number that means nothing.
+    code_uid, code_name = se_uid_employee_codes(db)
+    join_uid, join_name = se_uid_joining_dates(db)
+    for p in people.values():
+        p["code"] = (code_uid.get(_tight(p["uid"]))
+                     or code_name.get(_tight(p["name"])) or "")
+        # WITH KCGL is counted from the TRAINING REPORT'S HIRE DATE, on the
+        # business's word (2026-09-03). That is one of the nine FIXED columns of
+        # that import (matched as HIRE DATE / DATE OF JOINING / DOJ / JOINING
+        # DATE) and it is filled on every row of the file.
+        #
+        # HR's own DATE OF JOINING from the Attendance Summary is kept as the
+        # fallback, and only that. The two disagree on 95 of the 119 active
+        # engineers — Aditya Pathare is 2025-11-08 in the training file against
+        # 2025-06-23 in HR's — so which one is authoritative is a business
+        # decision and not a technical one. `hired_src` records which was used
+        # so the page never presents one as the other.
+        if p["hired"]:
+            p["hired_src"] = "training"
         else:
-            if cat and cat not in cur["cats"]:
-                cur["cats"].append(cat)
-            if date > (cur["date"] or ""):
-                cur["date"] = date
+            hr_joined = (join_uid.get(_tight(p["uid"]))
+                         or join_name.get(_tight(p["name"])) or "")
+            p["hired"], p["hired_src"] = hr_joined, ("hr" if hr_joined else "")
+
+
+    # ---- SR CLOSED, real, from the MaxTTR file -----------------------------
+    sr_days, sr_meta = _se_performance_sr_days(db, people)
+    # ---- and DAYS PRESENT, real, from HR's Attendance Summary --------------
+    hr_days, hr_months, att_codes = _se_performance_hr_days(
+        db, _att_resolver(people))
+    # ---- and DAYS PRESENT ON TASK END, the field-work marker ---------------
+    te_days = _se_performance_task_end_days(db, people)
+    # ---- SPARE / LABOUR conversion amounts, EP's two money columns ---------
+    conv, conv_meta = _se_performance_conversions(db, people)
+    # ---- CDI feedback, EP's three buckets ----------------------------------
+    cdi, cdi_meta = _se_performance_cdi(db, people)
+    # ---- FIRST SITE and TASK CLOSURE, out of the EFSR file -----------------
+    efsr, efsr_closed, efsr_alloc, efsr_meta = _se_performance_efsr(db, people)
+    # ---- AMC LEADS (LMS) and BATTERIES SOLD (part sales) -------------------
+    lb, lb_meta = _se_performance_leads_battery(db, people)
+    # ---- how far the data actually reaches ---------------------------------
+    data_min, data_max = _pms_data_window(db)
+
+    # ---- ACTIVE ONLY -------------------------------------------------------
+    # Strictly 'Active', the same as the Training Report's own 'Active only'
+    # filter: a status the file never carried is NOT a claim that the man is
+    # still serving, so an engineer with no status stays off a report that
+    # judges his performance. That is fixed in the Training Report, not here.
+    active = [p for p in people.values() if p["status"] == "Active" and p["name"]]
+
+    # every SR day offset is measured from here
+    sr_base = sr_meta["from"] or date.today().isoformat()
 
     engineers = []
-    for r in db.query(PmsSeUid).order_by(PmsSeUid.se_name).all():
-        bid = _norm_branch_id(r.branch_id or "")
-        if bid not in known:
-            continue
-        uids = _uid_list(r.se_uid)
-        uid = uids[0] if uids else ""
-        name = (r.se_name or "").strip()
-
-        # Nothing here is invented and nothing is guessed. The hire date and the
-        # training hang off the engineer's own UID; no UID means no claim, and
-        # the report prints a dash. The employee code has no source at all yet
-        # (see the note above). `key` is the report's own internal handle,
-        # never shown.
-        tr = trainings.get(uid, {}) if uid else {}
+    for p in active:
         engineers.append({
-            "key": "row%d" % r.id,
-            "id": r.id,
-            "uid": uid,
-            "name": name,
-            "branch_id": bid,
-            "code": "",          # see the note above — no source for it yet
-            "hired": (hired.get(uid) or "") if uid else "",
-            "trainings": sorted(
-                ([sk, " · ".join(v["cats"]), v["date"]] for sk, v in tr.items()),
-                key=lambda t: t[2], reverse=True),
+            # the report's own internal handle, never shown. The UID keeps an
+            # engineer's row — and, while the figures are still generated, his
+            # figures — stable across reloads and re-uploads.
+            "key": p["uid"],
+            "uid": p["uid"],
+            "name": p["name"],
+            "branch_id": p["branch_id"],
+            "code": p["code"],          # HR's employee code — the employee ID
+            "ticket": p["ticket"],      # KOEL's EMPLOYEE TICKET NUMBER
+            "occupation": p["occupation"],
+            "title": p["title"],
+            "status": p["status"],
+            "status_source": p["status_source"],
+            "hired": p["hired"], "hired_src": p["hired_src"],
+            # newest first, so the report's 'last <date>' is just the head
+            "trainings": sorted(p["_tr"], key=lambda t: (t[2] or "", t[0]),
+                                reverse=True),
+            # SR CLOSED, day by day, as [days since sr_base, count]. Compact
+            # because it is the whole history: 22k pairs across the roster, and
+            # an object keyed by date would be three times the bytes. None —
+            # not [] — for an engineer the MaxTTR file has never named.
+            "sr": _sr_pairs(sr_days.get(p["uid"]), sr_base),
+            # {'YYYY-MM': days present}. Small enough to send as it is — one
+            # entry per uploaded month, and HR uploads one month at a time.
+            "hr": hr_days.get(p["uid"]) or None,
+            # {'YYYY-MM': one character per day} — HR's day-wise attendance,
+            # which is what the attendance table under the breakdown draws
+            "at": att_codes.get(p["uid"]) or None,
+            # {'YYYY-MM': distinct task-end days} — the third day figure
+            "te": te_days.get(p["uid"]) or None,
+            # {iso order date: [spare, labour]} — the conversion amounts
+            "cv": conv.get(p["uid"]) or None,
+            # {iso activity end date: [promotor, detractor, passive]}
+            "cd": cdi.get(p["uid"]) or None,
+            # {iso visit date: [first before 10, day, closed same day, tasks]}
+            "ef": efsr.get(p["uid"]) or None,
+            # {iso TASK END date: closed SRs} — the SR Count commitment, counted
+            # the way the SR Allocation report counts a closure
+            "ec": efsr_closed.get(p["uid"]) or None,
+            # {iso TASK ASSIGNED date: allocated SRs}
+            "ea": efsr_alloc.get(p["uid"]) or None,
+            # {iso date: [amc leads, batteries sold]}
+            "lb": lb.get(p["uid"]) or None,
         })
-    return {"success": True, "branches": branches, "engineers": engineers}
+    engineers.sort(key=lambda e: (e["name"] or "").upper())
+
+    # Every branch the master lists, plus any the training file places an active
+    # engineer in — the front end drops the empty ones itself.
+    for p in active:
+        if p["branch_id"] and p["branch_id"] not in names:
+            names[p["branch_id"]] = p["file_branch"] or p["branch_id"]
+    branches = [{"branch_id": b, "branch_name": names[b],
+                 "region": regions.get(b, "MH")}
+                for b in sorted(names, key=_branch_sort_key)]
+
+    return {
+        "success": True, "branches": branches, "engineers": engineers,
+        "sr_base": sr_base,
+        # The month-wise WORKING DAYS master (AOP Master), per region, exactly
+        # as Employee Productivity is given it: the FY-specific rows plus the
+        # universal per-calendar-month fallback, resolved client-side so the
+        # report can price any month without a refetch.
+        "working_days": _working_days_master(db),
+        # which months HR has actually uploaded — the page needs to tell 'nobody
+        # was present' apart from 'nobody has told us yet'
+        "attendance_months": hr_months,
+        # the months the LMS lead file and the part-sale file can attribute a
+        # record to any engineer at all — outside them the two figures are blank
+        "amc_months": lb_meta["amc_months"],
+        "battery_months": lb_meta["battery_months"],
+        # the same window Employee Productivity reports as meta.min_date /
+        # max_date. WORKING DAYS are prorated to data_max — see workDaysOf().
+        "data_min": data_min, "data_max": data_max,
+        "meta": {
+            "source": "training_report",
+            "people": len(people),
+            "active": len(engineers),
+            "inactive": sum(1 for p in people.values() if p["status"] == "Inactive"),
+            "no_status": sum(1 for p in people.values() if not p["status"]),
+            "sr": sr_meta,
+            "hr": {"months": len(hr_months),
+                   "engineers": sum(1 for p in active if hr_days.get(p["uid"]))},
+            # the months the DAY-WISE file has been uploaded for, which is a
+            # shorter list than hr.months while HR's older summary export is
+            # still the only thing on record for a month
+            "attendance": {
+                "months": sorted({m for v in att_codes.values() for m in v}),
+                "engineers": sum(1 for p in active if att_codes.get(p["uid"]))},
+            "conv": conv_meta,
+            "cdi": cdi_meta,
+            "efsr": efsr_meta,
+            "leads_battery": lb_meta,
+        },
+    }
+
+
+def att_months_stored(db: Session):
+    """Every attendance month on record, NEWEST FIRST — what the Import dialog
+    shows so nobody has to guess whether a month is already in.
+
+    employees is the month's own row count, kind says which export it came from
+    (the day-wise file also writes the summary row, so a month with day rows is
+    a 'day' month), and last_at is when it was uploaded.
+    """
+    from app.models.pms_model import PmsAttendanceDay, PmsAttendanceSummary
+
+    rows = (db.query(PmsAttendanceSummary.period_month,
+                     func.count(PmsAttendanceSummary.id),
+                     func.max(func.coalesce(PmsAttendanceSummary.updated_at,
+                                            PmsAttendanceSummary.created_at)))
+            .group_by(PmsAttendanceSummary.period_month).all())
+    day_months = {m for (m,) in db.query(PmsAttendanceDay.period_month)
+                  .distinct().all() if m}
+    out = [{"month": m, "employees": int(n or 0),
+            "kind": "day" if m in day_months else "summary",
+            "last_at": at.isoformat() if at else None}
+           for m, n, at in rows if m]
+    out.sort(key=lambda r: r["month"], reverse=True)
+    return out
 
 
 def se_uid_payload(db: Session, user_id: str = None, sync: bool = False):
@@ -2410,6 +3629,7 @@ def se_uid_payload(db: Session, user_id: str = None, sync: bool = False):
                 seen[k] = it["se_name"]
     return {"success": True, "items": items, "synced": synced,
             "branches": branches,
+            "attendance_months": att_months_stored(db),
             "duplicate_uids": [{"uid": u, "names": n} for u, n in dup.items()],
             "stats": {
                 "total": len(items),
@@ -2420,6 +3640,154 @@ def se_uid_payload(db: Session, user_id: str = None, sync: bool = False):
                 "in_lms": sum(1 for i in items if i["in_lms"]),
                 "in_efsr": sum(1 for i in items if i["in_efsr"]),
             }}
+
+
+# THE COLUMNS THE CURRENT FILE CARRIES, in the order 'Attendance <Month>'
+# prints them. The older 'Attendance Summary' export had five more — Payable
+# Days, Leave & Absent, LOP, Allowed Leave, Total Payable Days — and an
+# EmpStatus; the day-wise file is the one HR sends now and it has none of them,
+# so nothing reads them any more. The physical columns are still on
+# pms_attendance_summary holding what the old export left there; they are
+# nullable and unused, and dropping them is a one-line migration if it is ever
+# worth doing.
+_ATT_FIGURES = ["total_days_month", "present", "out_door_duty", "half_day",
+                "absent", "leave", "weekly_off", "c_off", "holiday", "na"]
+
+
+def _att_rows_for(db: Session, row):
+    """Every attendance month belonging to ONE master row, newest month first.
+
+    Matched the SAME way the import matches — UID first, letters-only name
+    second — and the caller is told WHICH of the two found it, because that is
+    the difference between a link that survives a name change and one that does
+    not. A master row with no UID can only ever be found by its name.
+    """
+    from app.models.pms_model import PmsAttendanceSummary
+
+    uids = {u.upper() for u in _uid_list(row.se_uid)}
+    key = _tight(row.name_key)
+    by_uid, by_name = [], []
+    for r in db.query(PmsAttendanceSummary).all():
+        u = (r.uid or "").strip().upper()
+        if u and u in uids and "PENDING" not in u and "HOLD" not in u:
+            by_uid.append(r)
+        elif key and _tight(r.name_key or r.employee_name) == key:
+            by_name.append(r)
+    rows = by_uid or by_name
+    rows.sort(key=lambda r: r.period_month or "", reverse=True)
+    return rows, ("uid" if by_uid else ("name" if by_name else None))
+
+
+def se_uid_detail(db: Session, row_id: int):
+    """ONE engineer in full — what the SE UID Master's Edit dialog opens on.
+
+    Three blocks:
+      hr        HR's own identity for this engineer, off the NEWEST attendance
+                month on record (E Code, UID, the name HR spells, Designation,
+                Joining Date, EmpStatus and HR's branch), plus how many months
+                are on record and which key matched them.
+      months    every month, all fifteen figures, newest first.
+      training  the employment status — read from the Training Report's own
+                store so the two pages cannot disagree (see set_se_uid_status).
+
+    hr is None when nothing matched, and the dialog says so rather than
+    printing a row of blanks.
+    """
+    row = db.query(PmsSeUid).filter(PmsSeUid.id == row_id).first()
+    if row is None:
+        return {"success": False, "message": "That engineer is no longer in the master"}
+
+    rows, matched_by = _att_rows_for(db, row)
+    hr = None
+    if rows:
+        newest = rows[0]
+        hr = {
+            "e_code": newest.e_code,
+            "uid": newest.uid,
+            "employee_name": newest.employee_name,
+            "designation": newest.designation,
+            "joining_date": (newest.joining_date.isoformat()
+                             if newest.joining_date else None),
+            "branch": newest.branch,
+            "branch_id": newest.branch_id,
+            "months": len(rows),
+            "matched_by": matched_by,
+        }
+    months = [{"period_month": r.period_month,
+               **{f: getattr(r, f) for f in _ATT_FIGURES}} for r in rows]
+
+    # ---- the employment status, as the TRAINING REPORT holds it -------------
+    # A typed status beats the file, and across an engineer's training rows
+    # 'Inactive' wins — the same rule the Training Report itself applies, so
+    # neither page can show the other's answer as different.
+    from app.models.pms_model import PmsTrainingRecord, PmsTrainingStatusOverride
+
+    training = {"status": None, "status_source": None, "left_on": None,
+                "reason": None, "set_by": None}
+    uids = [u for u in _uid_list(row.se_uid)]
+    if uids:
+        o = (db.query(PmsTrainingStatusOverride)
+             .filter(PmsTrainingStatusOverride.uid_no.in_(uids)).first())
+        if o is not None:
+            training = {"status": o.status, "status_source": "manual",
+                        "left_on": o.left_on.isoformat() if o.left_on else None,
+                        "reason": o.reason, "set_by": o.set_by}
+        else:
+            have = [s for (s,) in db.query(PmsTrainingRecord.current_status)
+                    .filter(PmsTrainingRecord.uid_no.in_(uids)).distinct().all()
+                    if (s or "").strip()]
+            if have:
+                training = {"status": ("Inactive" if "Inactive" in have else have[0]),
+                            "status_source": "file", "left_on": None,
+                            "reason": None, "set_by": None}
+
+    return {"success": True, "id": row.id,
+            "se_name": row.se_name, "se_uid": row.se_uid,
+            "branch_id": row.branch_id,
+            "sources": {"maxttr": bool(row.src_maxttr), "lms": bool(row.src_lms),
+                        "efsr": bool(row.src_efsr),
+                        "attendance": bool(row.src_attendance)},
+            "hr": hr, "months": months, "figures": _ATT_FIGURES,
+            "training": training}
+
+
+def set_se_uid_status(db: Session, row_id: int, status, left_on=None,
+                      reason=None, user_id: str = None):
+    """Type an employment status from the SE UID Master.
+
+    IT IS NOT STORED HERE. The status lives in the Training Report's
+    pms_training_status_overrides, keyed on UID NO, and this only calls that
+    page's own writer — the two pages read and write ONE row, so they cannot
+    drift apart. An empty status clears the override and hands the engineer back
+    to whatever the uploaded training file says.
+
+    allow_unknown_uid is True on purpose: the Training Report refuses a UID it
+    has no employee for, because the row would be invisible there, but here the
+    engineer is on screen with a Clear button in front of the user.
+    """
+    from app.controllers import pms_training_controller as tc
+
+    row = db.query(PmsSeUid).filter(PmsSeUid.id == row_id).first()
+    if row is None:
+        return {"success": False, "message": "That engineer is no longer in the master"}
+    uids = _uid_list(row.se_uid)
+    if not uids:
+        # the override is keyed on UID NO — there is nothing to key it on
+        return {"success": False,
+                "message": "Give this engineer a UID first — the status is stored "
+                           "against the UID, which is what the Training Report "
+                           "shares it by"}
+    uid = uids[0]
+    want = (str(status or "").strip() or None)
+    if want is None:
+        out = tc.clear_manual_status(db, uid)
+    else:
+        out = tc.set_manual_status(db, uid, want, left_on, reason, user_id,
+                                   allow_unknown_uid=True)
+    if isinstance(out, dict) and out.get("success") is False:
+        return out
+    return {**(out if isinstance(out, dict) else {}), "success": True,
+            **se_uid_detail(db, row_id)}
 
 
 def save_se_uid(db: Session, row_id, se_name, se_uid, user_id: str, branch_id=None):
@@ -2464,6 +3832,9 @@ def save_se_uid(db: Session, row_id, se_name, se_uid, user_id: str, branch_id=No
         db.add(row)
     row.se_name, row.name_key, row.se_uid = name, key, uid
     row.branch_id = branch
+    # Typed here, so it outranks every monthly export from now on — the same
+    # rule the branch review saves under (see apply_branch_review).
+    row.branch_pinned = bool(branch)
     row.updated_by = user_id
     db.commit()
     return se_uid_payload(db, user_id, sync=False)
@@ -2490,15 +3861,601 @@ _SE_UID_HEADERS = ["SEUID", "SERVICEENGINEERUID", "ENGINEERUID", "UID",
 _SE_BRANCH_HEADERS = ["BRANCHCODE", "BRANCHID", "BRANCH", "SDBRANCHCODE"]
 
 
-def import_se_uids(db: Session, contents: bytes, user_id: str):
-    """Bulk-load the master from an Excel file (SE Name, SE UID, and optionally
-    Branch Code). Existing names are updated in place, new ones inserted."""
+# ---------------- HR ATTENDANCE (Profile -> SE UID Master) ----------------- #
+#
+# HR exports the same month twice, and the SE UID Master's Import button takes
+# either one:
+#
+#   'Attendance July.xlsx'          Code, UID, ..., D_01 .. D_31, then a count
+#                                   per status. DAY-WISE - the one this module
+#                                   prefers, because it is the only attendance
+#                                   source with a DATE on it.
+#   'Attendance Summary July.xlsx'  E Code, UID, ..., Present, Leave, Out Door
+#                                   Duty, ... Payable Days, LOP, EmpStatus.
+#                                   WHOLE-MONTH counts only.
+#
+# Neither file carries a month of its own - 'July' lives in the file name - so
+# the period is chosen in the dialog and arrives here as 'YYYY-MM'.
+#
+# WHAT THE DAY CELLS MEAN. Checked against July's two files, 142 employees:
+#   * the day file's trailing counts are exactly the totals of its own day
+#     cells (142 x 9 counts, 0 mismatches), so the day file ALONE can carry a
+#     month and the summary row is DERIVED from it;
+#   * the summary's PRESENT is the plain count of 'Present' day cells (142/142)
+#     - it does NOT include the worked half of a half day;
+#   * the summary's HALF DAY is the number of half days x 0.5 (142/142), i.e.
+#     already expressed in DAYS. That is why the nine count columns add up to
+#     Total Days Month on only 126 of the 142 rows: the 16 that fall short are
+#     exactly the 16 with a half day, each short by 0.5.
+# So a day worked is P or O at 1.0 and H at 0.5, and only L and A cost a day.
+# W, C and Y are days nobody was expected to work at all.
+
+_ATT_CODE = {
+    "PRESENT": "P",
+    "OUTDOORDUTY": "O", "OUTDOOR": "O", "OD": "O",
+    "HALFDAY": "H",
+    "LEAVE": "L",
+    "ABSENT": "A", "ABS": "A",
+    "WEEKLYOFF": "W", "WEEKOFF": "W", "WO": "W",
+    "COFF": "C", "COMPOFF": "C", "COMPENSATORYOFF": "C",
+    "HOLIDAY": "Y", "PUBLICHOLIDAY": "Y",
+    "NA": "-",
+}
+# what one day of each is worth in DAYS PRESENT
+_ATT_WORTH = {"P": 1.0, "O": 1.0, "H": 0.5}
+
+
+# HR spells one KALA branch its own way. Bidar and Raichur are NOT KALA
+# branches and are meant to resolve to nothing - only the raw name is kept for
+# those, exactly as pms_attendance_summary.branch documents.
+_ATT_BRANCH_ALIAS = {"GULBERGA": "Gulbarga", "GULBARGA": "Gulbarga",
+                     "KALABURAGI": "Gulbarga"}
+
+
+def _att_code(value):
+    """One letter for a day cell: '-' for a cell that says nothing, None for a
+    word this file has never used before (which the import reports)."""
+    # an EMPTY cell is not an unrecognised status: HR leaves the days before a
+    # man joined blank, and pandas hands those over as NaN
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return "-"
+    t = _tight(value)
+    return "-" if not t else _ATT_CODE.get(t)
+
+
+def _att_month_days(month: str):
+    """(year, month, days in it) for a 'YYYY-MM', or None if it is not one."""
+    try:
+        if len(month) != 7 or month[4] != "-":
+            return None
+        y, m = int(month[:4]), int(month[5:7])
+        if not (2000 <= y <= 2100 and 1 <= m <= 12):
+            return None
+        return y, m, calendar.monthrange(y, m)[1]
+    except Exception:
+        return None
+
+
+def _att_is_day_file(tight_cols) -> bool:
+    """The day-wise export, recognised by its day columns."""
+    return sum(1 for c in tight_cols if re.fullmatch(r"D0*\d{1,2}", c)) >= 20
+
+
+def _att_is_summary_file(tight_cols) -> bool:
+    """The whole-month export, recognised the way the dialog recognises it."""
+    return ("ECODE" in tight_cols
+            and bool(tight_cols & {"EMPSTATUS", "TOTALDAYSMONTH", "PAYABLEDAYS",
+                                   "TOTALPAYABLEDAYS"}))
+
+
+def _att_identity(df):
+    """{field: column} for the identity columns the two files share."""
+    cols = {_tight(c): c for c in df.columns if str(c).strip()}
+
+    def pick(*names):
+        return next((cols[n] for n in names if n in cols), None)
+
+    return {
+        "e_code": pick("ECODE", "CODE", "EMPLOYEECODE", "EMPCODE"),
+        "uid": pick("UID", "SEUID"),
+        "name": pick("EMPLOYEENAME", "NAME", "SENAME"),
+        "joining": pick("JOININGDATE", "DATEOFJOINING", "DOJ"),
+        "branch": pick("BRANCH", "BRANCHNAME"),
+        "designation": pick("DESIGNATION", "DESIGNATIONNAME"),
+    }
+
+
+def _att_name(value):
+    """The name as HR wrote it, minus the whitespace Excel hides in it.
+
+    Every name in the HR export has a NON-BREAK SPACE between the first and
+    last name ('Aditya  Patare'). It is invisible on screen and survives a
+    plain strip(), so a row inserted from this file would carry it for ever."""
+    return _clean_str(re.sub(r"\s+", " ", str(value or "")).strip(), 200)
+
+
+def _att_uid(value):
+    """(the UID as typed, the UID worth joining on).
+
+    A new joiner is written 'UID Pending' / 'UID Hold'. That is stored as typed
+    so the master can show what HR said, but it is never joined on and never
+    offered to the master as a UID."""
+    uid = _clean_str(value, 100)
+    if not uid:
+        return None, None
+    letters = set(re.findall(r"[A-Z]+", uid.upper()))
+    return uid, (None if {"PENDING", "HOLD"} & letters else uid)
+
+
+def _att_alias_map(db: Session):
+    """{branch name key -> KALA branch id}, as the business has answered it.
+
+    Filled by the branch review the HR import opens (apply_branch_review): one
+    answer per spelling, and every later month resolves it with nothing typed.
+    """
+    from app.models.pms_model import PmsAttBranchAlias
+
+    return {a.name_key: a.branch_id
+            for a in db.query(PmsAttBranchAlias).all() if a.branch_id}
+
+
+def _att_branch_id(branches, name, aliases=None):
+    """HR's branch name -> the KALA branch id, through HR's own spellings.
+
+    Three answers, in this order: the branch name as some file already spells it,
+    the SAVED alias a human typed in the branch review, and finally the
+    hard-coded list this module shipped with.
+    """
+    if not name:
+        return None
+    key = _branch_name_key(name)
+    return (branches.get(key)
+            or (aliases or {}).get(key)
+            or branches.get(_branch_name_key(_ATT_BRANCH_ALIAS.get(key.upper(), ""))))
+
+
+def _branch_question(row, hr_name, hr_id, br_names):
+    """The branch question ONE engineer raises, or None when there is none.
+
+    Called from the attendance import (_att_master_fill) and from the review the
+    Profile page can re-open at any time (pending_branch_review), so both ask
+    the same question of the same row and cannot drift apart.
+
+    None when: HR's file names no branch, the row's branch has been settled by a
+    human (branch_pinned), or HR's branch is the one the row already holds.
+      'unknown'   HR's spelling is no KALA branch — nothing can be resolved from
+                  it until somebody says what it means.
+      'different' both are real KALA branches, and they disagree.
+    """
+    if not hr_name or getattr(row, "branch_pinned", False):
+        return None
+    cur = (row.branch_id or "").strip()
+    hr_id = (hr_id or "").strip()
+    if hr_id == cur:
+        return None
+    return {
+        "row_id": row.id,
+        "kind": "unknown" if not hr_id else "different",
+        "se_name": row.se_name, "se_uid": row.se_uid or "",
+        "hr_branch": hr_name,
+        "hr_branch_id": hr_id,
+        "hr_branch_name": br_names.get(hr_id, ""),
+        "current_branch_id": cur,
+        "current_branch_name": br_names.get(cur, ""),
+    }
+
+
+def pending_branch_review(db: Session, month: str = None):
+    """The branch questions the attendance ALREADY STORED still raises.
+
+    The review opens by itself the moment an HR file is imported, but a month
+    uploaded before this existed - or a dialog somebody closed with 'Later' -
+    would otherwise never be asked again. This re-derives the same questions
+    from pms_attendance_summary, which keeps HR's own branch spelling next to
+    the branch that was resolved from it.
+
+    The NEWEST month on record answers for the roster: an engineer's posting is
+    what the latest file says, not what an old one did.
+    """
+    from app.models.pms_model import PmsAttendanceSummary
+
+    if not month:
+        months = att_months_stored(db)
+        if not months:
+            return {"month": None, "items": []}
+        month = months[0]["month"]
+    br_names = {b["branch_id"]: b["branch_name"] for b in se_uid_branches(db)}
+    aliases = _att_alias_map(db)
+    branches = _branch_by_name(db)
+    owners = _uid_owner_map(db)
+    rows = {}
+    for r in db.query(PmsSeUid).all():
+        rows.setdefault(_tight(r.name_key), r)
+
+    out = {}
+    for a in (db.query(PmsAttendanceSummary)
+              .filter(PmsAttendanceSummary.period_month == month).all()):
+        hr_name = (a.branch or "").strip()
+        if not hr_name:
+            continue
+        _raw, uid_join = _att_uid(a.uid)
+        key = _name_key(a.name_key or a.employee_name)
+        row = (owners.get(uid_join.upper()) if uid_join else None) or rows.get(_tight(key))
+        if row is None:
+            continue
+        # resolved AGAIN rather than trusting the stored branch_id: an alias
+        # saved since the upload must count as answered
+        q = _branch_question(row, hr_name,
+                             _att_branch_id(branches, hr_name, aliases), br_names)
+        if q:
+            q["e_code"] = a.e_code or ""
+            out[row.id] = q
+    return {"month": month,
+            "items": sorted(out.values(),
+                            key=lambda r: (r["hr_branch"], r["se_name"]))}
+
+
+def _att_master_fill(db: Session, people, user_id):
+    """Fill the SE UID Master's BLANKS from an attendance file.
+
+    The attendance export is the only file carrying HR's employee code next to
+    the Service Engineer UID, which is what makes it worth reading here at all.
+    It fills blanks and never overwrites: a UID or a branch somebody typed on
+    the Profile page outranks anything a monthly export says.
+
+    THE BRANCH IS THE ONE THING IT CANNOT DECIDE ALONE. Filling a blank is
+    safe; a file that names a DIFFERENT branch from the one on the row, or a
+    branch name that is no KALA branch at all, is a question for the business.
+    Both are collected into `review` — one entry per engineer, carrying HR's
+    spelling and the branch the row holds now — and the Profile page asks them
+    with a branch dropdown (see apply_branch_review). Nothing is overwritten
+    here either way.
+
+    people: [{name, name_key, uid_join, branch_id, branch, e_code}], cleaned.
+    Returns (inserted, uid_filled, branch_filled, notes, review).
+    """
+    rows = {}
+    for r in db.query(PmsSeUid).all():
+        rows.setdefault(_tight(r.name_key), r)
+    owners = _uid_owner_map(db)
+    br_names = {b["branch_id"]: b["branch_name"] for b in se_uid_branches(db)}
+    inserted = uid_filled = branch_filled = 0
+    notes, uid_seen = [], {}
+    review = {}                      # row id -> the branch question to ask
+    for p in people:
+        key = p["name_key"]
+        if not key:
+            continue
+        u = p.get("uid_join")
+        # THE UID IS THE IDENTITY, THE NAME IS ONLY A LABEL. HR and KOEL spell
+        # the same engineer differently often enough that matching on the name
+        # alone is wrong: on the July file it opened 38 duplicate master rows -
+        # 'Aditya Patare' beside 'ADITYA PATHARE', 'Alsaif Shaikh' beside
+        # 'ALSIF SHAIKH' - every one of them already holding the very UID this
+        # file was quoting. So the UID is tried first and the squashed name is
+        # the fallback for a row that has no UID yet.
+        row = (owners.get(u.upper()) if u else None) or rows.get(_tight(key))
+        if u:
+            if uid_seen.setdefault(u.upper(), key) != key:
+                notes.append(f"UID {u} is on two people in this file — "
+                             f"“{uid_seen[u.upper()]}” and “{key}”")
+        if row is None:
+            row = PmsSeUid(se_name=p["name"], name_key=key, src_attendance=True,
+                           created_by=user_id, updated_by=user_id)
+            db.add(row)
+            db.flush()                     # the UID claim below needs its id
+            rows[_tight(key)] = row
+            inserted += 1
+        elif not row.src_attendance:
+            row.src_attendance = True
+        if u and not (row.se_uid or "").strip():
+            other = owners.get(u.upper())
+            if other is not None and other.id != row.id:
+                notes.append(f"{p['name']}: UID {u} already belongs to "
+                             f"“{other.se_name}” — left blank")
+            else:
+                row.se_uid, row.updated_by = u[:100], user_id
+                owners[u.upper()] = row
+                uid_filled += 1
+        b = p.get("branch_id")
+        hr_name = (p.get("branch") or "").strip()
+        cur = (row.branch_id or "").strip()
+        if b and not cur:
+            row.branch_id, row.updated_by = b, user_id
+            branch_filled += 1
+        else:
+            q = _branch_question(row, hr_name, b, br_names)
+            if q:
+                q["e_code"] = p.get("e_code") or ""
+                review[row.id] = q
+    # the engineers first, and inside a branch the file's own spelling — the
+    # dialog then reads as one question per branch instead of a shuffled list
+    return (inserted, uid_filled, branch_filled, notes,
+            sorted(review.values(), key=lambda r: (r["hr_branch"], r["se_name"])))
+
+
+def _att_write_summary(db: Session, month, per_emp, user_id):
+    """Upsert one pms_attendance_summary row per employee for `month`.
+
+    Called by BOTH imports. The day-wise file fills the count columns it can
+    derive and leaves Payable Days, LOP, Allowed Leave and EmpStatus alone, so
+    uploading the day file after the summary file does not throw away the four
+    figures only the summary carries - and uploading it first simply leaves
+    them empty until the summary arrives.
+    """
+    from app.models.pms_model import PmsAttendanceSummary
+
+    have = {str(r.e_code or "").strip(): r
+            for r in db.query(PmsAttendanceSummary)
+            .filter(PmsAttendanceSummary.period_month == month).all()}
+    stored = 0
+    for code, v in per_emp.items():
+        row = have.get(code)
+        if row is None:
+            row = PmsAttendanceSummary(period_month=month, e_code=code,
+                                       created_by=user_id)
+            db.add(row)
+        for f, val in v.items():
+            setattr(row, f, val)
+        row.updated_by = user_id
+        stored += 1
+    return stored
+
+
+def import_attendance_days(db: Session, df, month: str, user_id: str):
+    """HR's DAY-WISE attendance file -> pms_attendance_day, plus the month's
+    summary row derived from the very same day cells.
+
+    Re-uploading a month REPLACES that month's rows and touches no other month.
+    """
+    from app.models.pms_model import PmsAttendanceDay
+
+    span = _att_month_days(month or "")
+    if not span:
+        return {"success": False,
+                "message": "Choose the month this attendance file covers"}
+    year, mon, dim = span
+
+    ident = _att_identity(df)
+    if not ident["e_code"] or not ident["name"]:
+        return {"success": False,
+                "message": "The file needs a 'Code' and an 'Employee Name' column"}
+    # D_01 .. D_31 -> day number, ignoring any day this month does not have
+    days = []
+    for c in df.columns:
+        m = re.fullmatch(r"D0*(\d{1,2})", _tight(c))
+        if m and 1 <= int(m.group(1)) <= dim:
+            days.append((int(m.group(1)), c))
+    days.sort()
+    if len(days) < 20:
+        return {"success": False,
+                "message": "The file has no D_01 … D_31 day columns"}
+
+    branches = _branch_by_name(db)
+    aliases = _att_alias_map(db)
+    replaced = (db.query(PmsAttendanceDay)
+                .filter(PmsAttendanceDay.period_month == month)
+                .delete(synchronize_session=False))
+    db.flush()
+
+    people, per_emp, unknown = [], {}, set()
+    written = 0
+    for _, r in df.iterrows():
+        code = _clean_str(r.get(ident["e_code"]), 50)
+        name = _name_key(r.get(ident["name"]))
+        if not code or not name:
+            continue
+        uid_raw, uid_join = _att_uid(r.get(ident["uid"]))
+        who = _att_name(r.get(ident["name"]))
+        bname = _clean_str(r.get(ident["branch"]), 120) if ident["branch"] else None
+        bid = _att_branch_id(branches, bname, aliases)
+        counts = {}
+        for dnum, col in days:
+            word = _clean_str(r.get(col), 40)
+            cd = _att_code(r.get(col))
+            if cd is None:                 # a status this file has not used before
+                unknown.add(f"status “{word}”")
+                cd = "-"
+            db.add(PmsAttendanceDay(
+                period_month=month, work_date=date(year, mon, dnum),
+                e_code=code, uid=uid_raw, employee_name=who, name_key=name,
+                status=word, code=cd, created_by=user_id))
+            written += 1
+            counts[cd] = counts.get(cd, 0) + 1
+        # the month's summary row, out of these very day cells. HALF DAY is
+        # stored in DAYS (occurrences x 0.5) because that is the convention the
+        # summary file itself uses - see the note at the top of this section.
+        per_emp[code] = {
+            "uid": uid_raw, "employee_name": who, "name_key": name,
+            "branch": bname, "branch_id": bid,
+            "designation": (_clean_str(r.get(ident["designation"]), 120)
+                            if ident["designation"] else None),
+            "joining_date": (_parse_date(r.get(ident["joining"]))
+                             if ident["joining"] else None),
+            "total_days_month": float(dim),
+            "present": float(counts.get("P", 0)),
+            "out_door_duty": float(counts.get("O", 0)),
+            "half_day": counts.get("H", 0) * 0.5,
+            "leave": float(counts.get("L", 0)),
+            "absent": float(counts.get("A", 0)),
+            "weekly_off": float(counts.get("W", 0)),
+            "c_off": float(counts.get("C", 0)),
+            "holiday": float(counts.get("Y", 0)),
+            "na": float(counts.get("-", 0)),
+        }
+        people.append({"name": who or name, "name_key": name,
+                       "uid_join": uid_join, "branch_id": bid,
+                       "branch": bname, "e_code": code})
+
+    stored = _att_write_summary(db, month, per_emp, user_id)
+    ins, uidf, brf, notes, review = _att_master_fill(db, people, user_id)
+    db.commit()
+    if unknown:
+        # only the day STATUSES are left here — an unrecognised branch is no
+        # longer a note to read, it is a question the review asks
+        notes.append("not recognised, left unresolved: "
+                     + ", ".join(sorted(unknown)[:8]))
+    return {"attendance": {"month": month, "stored": stored, "replaced": replaced,
+                           "days": written, "kind": "day"},
+            "inserted": ins, "uid_filled": uidf, "branch_filled": brf,
+            "conflicts": notes, "branch_review": review,
+            **se_uid_payload(db, user_id, sync=False)}
+
+
+def import_attendance_summary(db: Session, df, month: str, user_id: str):
+    """HR's WHOLE-MONTH 'Attendance Summary' -> pms_attendance_summary.
+
+    Still accepted, and it leaves any day rows already stored for the month
+    alone - but it now fills only the SAME ten columns the day-wise file has.
+    The five figures that were its own (Payable Days, Leave & Absent, LOP,
+    Allowed Leave, Total Payable Days) and its EmpStatus are no longer read:
+    the day-wise export is the file HR sends, and its columns are the report's
+    columns. See _ATT_FIGURES.
+    """
+    from app.models.pms_model import PmsAttendanceSummary
+
+    span = _att_month_days(month or "")
+    if not span:
+        return {"success": False,
+                "message": "Choose the month this attendance file covers"}
+    dim = span[2]
+
+    ident = _att_identity(df)
+    if not ident["e_code"] or not ident["name"]:
+        return {"success": False,
+                "message": "The file needs an 'E Code' and an 'Employee Name' column"}
+    cols = {_tight(c): c for c in df.columns if str(c).strip()}
+    # field -> the header skeletons HR has used for it
+    NUM = {
+        "total_days_month": ["TOTALDAYSMONTH", "TOTALDAYS"],
+        "present": ["PRESENT"], "leave": ["LEAVE"],
+        "out_door_duty": ["OUTDOORDUTY", "OUTDOOR"], "c_off": ["COFF"],
+        "holiday": ["HOLIDAY"], "half_day": ["HALFDAY"], "absent": ["ABSENT"],
+        "weekly_off": ["WEEKLYOFF", "WEEKOFF"], "na": ["NA"],
+    }
+    found = {f: next((cols[h] for h in hs if h in cols), None)
+             for f, hs in NUM.items()}
+
+    branches = _branch_by_name(db)
+    aliases = _att_alias_map(db)
+    people, per_emp = [], {}
+    for _, r in df.iterrows():
+        code = _clean_str(r.get(ident["e_code"]), 50)
+        name = _name_key(r.get(ident["name"]))
+        if not code or not name:
+            continue
+        uid_raw, uid_join = _att_uid(r.get(ident["uid"]))
+        who = _att_name(r.get(ident["name"]))
+        bname = _clean_str(r.get(ident["branch"]), 120) if ident["branch"] else None
+        bid = _att_branch_id(branches, bname, aliases)
+        v = {"uid": uid_raw, "employee_name": who, "name_key": name,
+             "branch": bname, "branch_id": bid,
+             "designation": (_clean_str(r.get(ident["designation"]), 120)
+                             if ident["designation"] else None),
+             "joining_date": (_parse_date(r.get(ident["joining"]))
+                              if ident["joining"] else None)}
+        for f, col in found.items():
+            if col is not None:
+                v[f] = _parse_amount(r.get(col))
+        if v.get("total_days_month") is None:
+            v["total_days_month"] = float(dim)
+        per_emp[code] = v
+        people.append({"name": who or name, "name_key": name,
+                       "uid_join": uid_join, "branch_id": bid,
+                       "branch": bname, "e_code": code})
+
+    # an employee the new export drops is gone from that month
+    replaced = (db.query(PmsAttendanceSummary)
+                .filter(PmsAttendanceSummary.period_month == month,
+                        PmsAttendanceSummary.e_code.notin_(list(per_emp) or [""]))
+                .delete(synchronize_session=False))
+    stored = _att_write_summary(db, month, per_emp, user_id)
+    ins, uidf, brf, notes, review = _att_master_fill(db, people, user_id)
+    db.commit()
+    return {"attendance": {"month": month, "stored": stored, "replaced": replaced,
+                           "kind": "summary"},
+            "inserted": ins, "uid_filled": uidf, "branch_filled": brf,
+            "conflicts": notes, "branch_review": review,
+            **se_uid_payload(db, user_id, sync=False)}
+
+
+def apply_branch_review(db: Session, engineers, aliases, user_id: str):
+    """The answers to the branch review the HR attendance import opens.
+
+    Two kinds of answer, and both are saved:
+      engineers  [{row_id, branch_id}] — the branch this engineer belongs to.
+                 It is written to the master row and PINNED, so no later monthly
+                 export changes it or asks about it again. branch_id '' clears
+                 the branch (and unpins it, handing the row back to the files).
+      aliases    [{hr_branch, branch_id}] — what HR's own spelling of a branch
+                 means. Stored once in pms_att_branch_alias; every later month
+                 resolves that spelling with nothing typed (see _att_branch_id).
+
+    Only a real KALA branch may be saved either way — the reports group on the
+    branch id, so a free-text code would put an engineer nowhere.
+    """
+    from app.models.pms_model import PmsAttBranchAlias
+
+    valid = {b["branch_id"] for b in se_uid_branches(db)}
+    pinned = aliased = 0
+    for e in engineers or []:
+        row = db.query(PmsSeUid).filter(PmsSeUid.id == e.get("row_id")).first()
+        if row is None:
+            continue
+        bid = _norm_branch_id(e.get("branch_id")) or None
+        if bid and bid not in valid:
+            return {"success": False,
+                    "message": f"“{bid}” is not a KALA branch — pick one from the list"}
+        row.branch_id = bid
+        # a cleared branch is not a decision to keep, it is a row handed back
+        row.branch_pinned = bool(bid)
+        row.updated_by = user_id
+        pinned += 1
+    have = {a.name_key: a for a in db.query(PmsAttBranchAlias).all()}
+    for a in aliases or []:
+        key = _branch_name_key(a.get("hr_branch"))
+        bid = _norm_branch_id(a.get("branch_id")) or None
+        if not key or not bid:
+            continue
+        if bid not in valid:
+            return {"success": False,
+                    "message": f"“{bid}” is not a KALA branch — pick one from the list"}
+        row = have.get(key)
+        if row is None:
+            db.add(PmsAttBranchAlias(name_key=key,
+                                     hr_name=_clean_str(a.get("hr_branch"), 200),
+                                     branch_id=bid, created_by=user_id,
+                                     updated_by=user_id))
+        else:
+            row.branch_id, row.updated_by = bid, user_id
+            row.hr_name = _clean_str(a.get("hr_branch"), 200) or row.hr_name
+        aliased += 1
+    db.commit()
+    return {"success": True, "pinned": pinned, "aliased": aliased,
+            **se_uid_payload(db, user_id, sync=False)}
+
+
+def import_se_uids(db: Session, contents: bytes, user_id: str, month: str = None):
+    """The SE UID Master's one Import button, for THREE files.
+
+    Which one it is, is decided by the columns and not by the file name:
+      * D_01 .. D_31            HR's day-wise attendance  -> import_attendance_days
+      * E Code + a month total  HR's Attendance Summary   -> import_attendance_summary
+      * SE Name + SE UID        the master itself, below - existing names are
+                                updated in place and new ones inserted.
+    `month` ('YYYY-MM') is the period an attendance file covers; it is asked for
+    in the dialog because neither HR export carries a month column."""
     try:
         df = _read_excel(contents)
     except Exception as e:
         return {"success": False, "message": f"Could not read Excel file: {e}"}
 
     cols = {_tight(c): c for c in df.columns}
+    tight = set(cols)
+    if _att_is_day_file(tight):
+        return import_attendance_days(db, df, month, user_id)
+    if _att_is_summary_file(tight):
+        return import_attendance_summary(db, df, month, user_id)
     name_col = next((cols[h] for h in _SE_NAME_HEADERS if h in cols), None)
     uid_col = next((cols[h] for h in _SE_UID_HEADERS if h in cols), None)
     branch_col = next((cols[h] for h in _SE_BRANCH_HEADERS if h in cols), None)
@@ -2574,14 +4531,35 @@ def _region_of(zone_name):
 
 
 def generate_report(db: Session, as_on: date, from_date: date = None,
-                    part_as_on: date = None, labour_as_on: date = None):
-    """Cached wrapper — see _generate_report for the report itself."""
-    return _cached(db, ("report", as_on, from_date, part_as_on, labour_as_on),
-                   lambda: _generate_report(db, as_on, from_date, part_as_on, labour_as_on))
+                    part_as_on: date = None, labour_as_on: date = None,
+                    allowed_branches=None):
+    """Cached wrapper — see _generate_report for the report itself.
+
+    `allowed_branches` (None = every branch) is part of the cache key: a branch
+    user's report is a DIFFERENT report, not the full one trimmed afterwards —
+    the Region / Segment / SR-Type / Category breakdowns and every total are
+    summed over that user's branches only.
+
+    A branch user's period is also pulled forward into their three-month
+    window, EVERY end of it, before the cache key is built — so an older period
+    asked for by hand answers from inside the window instead of reaching behind
+    it, and lands on the same cache entry the picker would have produced."""
+    scope = _scope_ids(allowed_branches)
+    floor = _scoped_floor(db, scope)
+    if floor is not None:
+        as_on = max(as_on, floor)
+        from_date = floor if from_date is None else max(from_date, floor)
+        part_as_on = None if part_as_on is None else max(part_as_on, floor)
+        labour_as_on = None if labour_as_on is None else max(labour_as_on, floor)
+    return _cached(db, ("report", as_on, from_date, part_as_on, labour_as_on,
+                        None if scope is None else tuple(scope)),
+                   lambda: _generate_report(db, as_on, from_date, part_as_on,
+                                            labour_as_on, scope))
 
 
 def _generate_report(db: Session, as_on: date, from_date: date = None,
-                     part_as_on: date = None, labour_as_on: date = None):
+                     part_as_on: date = None, labour_as_on: date = None,
+                     scope=None):
     """The full report payload for the period [from_date .. as_on].
 
     Without from_date the period is month-to-date (classic view). Weekly /
@@ -2602,11 +4580,17 @@ def _generate_report(db: Session, as_on: date, from_date: date = None,
     targets only up to its own last data date). Omitted -> both use as_on.
     """
     to_by = {"part": part_as_on or as_on, "labour": labour_as_on or as_on}
-    to_date = max(to_by.values())
+    to_date = max(to_by.values())          # part / labour only — see below
     if from_date is None:
         from_date = to_date.replace(day=1)
     if from_date > to_date:
         from_date, to_date = to_date, from_date
+    # The SR CLOSURE row has its own sources, whose extracts end on their own
+    # dates. Measured like the other two — as on the last date the CLOSURE file
+    # (MaxTTR) has, so a month where it stops early is not judged against a
+    # target prorated to a day it has no data for. Added AFTER to_date is fixed
+    # so a late extract can never stretch the sales period.
+    to_by["sr"] = _maxttr_last_close(db, scope) or to_date
     for rt in to_by:                       # keep each end inside the period
         to_by[rt] = min(max(to_by[rt], from_date), to_date)
 
@@ -2640,7 +4624,8 @@ def _generate_report(db: Session, as_on: date, from_date: date = None,
         return info
 
     month_by_rt = {rt: _months_till(d) for rt, d in to_by.items()}
-    all_months = sorted(set(month_by_rt["part"]) | set(month_by_rt["labour"]))
+    all_months = sorted(set(month_by_rt["part"]) | set(month_by_rt["labour"])
+                        | set(month_by_rt["sr"]))
 
     # The typed-in count still applies where the calendar has NOTHING ticked
     # for that region: the month's own saved row ('2026-04') first, then the
@@ -2679,8 +4664,11 @@ def _generate_report(db: Session, as_on: date, from_date: date = None,
     } for rt, m in month_by_rt.items()}
     total_days_rt = {rt: max(v.values()) for rt, v in total_days_reg.items()}
 
-    target_rows = db.query(PmsBranchTarget).filter(
-        PmsBranchTarget.target_month.in_(all_months)).all()
+    target_q = db.query(PmsBranchTarget).filter(
+        PmsBranchTarget.target_month.in_(all_months))
+    if scope is not None:                  # branch user: their branches only
+        target_q = target_q.filter(PmsBranchTarget.branch_id.in_(scope))
+    target_rows = target_q.all()
 
     # Per-branch target sums (full + prorated-till) and display info from the
     # latest touched month's target row. Each record type only counts the
@@ -2749,6 +4737,8 @@ def _generate_report(db: Session, as_on: date, from_date: date = None,
              .filter(PmsSalesRecord.claim_invoice_date >= from_date,
                      # cancelled invoices stay stored but never count
                      PmsSalesRecord.is_cancelled == False))          # noqa: E712
+        if scope is not None:              # branch user: their branches only
+            q = q.filter(PmsSalesRecord.branch_id.in_(scope))
         return q.filter(PmsSalesRecord.record_type == rt,
                         PmsSalesRecord.claim_invoice_date <= to_by.get(rt, to_date)) \
             if rt else q.filter(window)
@@ -2861,10 +4851,135 @@ def _generate_report(db: Session, as_on: date, from_date: date = None,
     part_rows = _branch_rows("part")
     labour_rows = _branch_rows("labour")
 
+    # ---- SR CLOSURE rows -------------------------------------------------
+    # The report's third measure, built to exactly the shape of the two above so
+    # the page can render it with the same tiles and the same branch table:
+    #   Target        the Service Load AOP's monthly SR closure target
+    #   Daily Target  spread over the branch region's working days
+    #   Closed On     closures on the SR window's last day
+    #   Target Till   the target prorated to that day
+    #   Closed Till   closures inside the period          <- MaxTTR file
+    #   Allocated     SRs GIVEN to an engineer in the period  <- EFSR file
+    from app.models.customer_model import (ResponseTimeMaxTTR as _MX,
+                                           EFSRReport as _EF)
+    sr_to = to_by["sr"]
+    _next = sr_to + timedelta(days=1)
+    _ok_scope = None if scope is None else set(scope)
+
+    sr_agg = {}                      # branch -> {closed_till, closed_on, allocated}
+
+    def _sr_bucket(b_raw):
+        """The scoped bucket for a branch code, or None when out of scope."""
+        b = _norm_branch_id(b_raw) or "UNKNOWN"
+        if _ok_scope is not None and b not in _ok_scope:
+            return None              # branch user: never another branch's SRs
+        return sr_agg.setdefault(b, {"closed_till": 0, "closed_on": 0,
+                                     "allocated": 0})
+
+    # CLOSED — the MaxTTR file, on SR CLOSE DATE (Employee Productivity's rule)
+    _cl_win = sa_and(_MX.sr_close_date >= from_date, _MX.sr_close_date < _next)
+    _cl_on = sa_and(_MX.sr_close_date >= sr_to, _MX.sr_close_date < _next)
+    for b_raw, c_till, c_on in (
+            _maxttr_closed_rows(db)
+            .with_entities(_MX.branch_id,
+                           func.sum(sa_case((_cl_win, 1), else_=0)),
+                           func.sum(sa_case((_cl_on, 1), else_=0)))
+            .filter(_cl_win)
+            .group_by(_MX.branch_id).all()):
+        a = _sr_bucket(b_raw)
+        if a is None:
+            continue
+        a["closed_till"] += int(c_till or 0)
+        a["closed_on"] += int(c_on or 0)
+
+    # ALLOCATED — the EFSR file, on TASK ASSIGNED DATE (unchanged)
+    _al_win = sa_and(_EF.task_assigned_date >= from_date,
+                     _EF.task_assigned_date < _next)
+    for b_raw, a_till in (
+            _efsr_rows(db)
+            .with_entities(_EF.sd_branch_code,
+                           func.sum(sa_case((_al_win, 1), else_=0)))
+            .filter(_al_win)
+            .group_by(_EF.sd_branch_code).all()):
+        a = _sr_bucket(b_raw)
+        if a is None:
+            continue
+        a["allocated"] += int(a_till or 0)
+
+    # Region per branch, for the working-day spread: the AOP target row first
+    # (it is the branch master), then whatever the sales data showed, then the
+    # ERP's own branch list — an SR-only branch still needs a region.
+    _erp_region = {b: r for r, b, _n in ERP_BRANCHES}
+    _erp_name = {b: n for _r, b, n in ERP_BRANCHES}
+
+    def _region_for(b):
+        t = info_by_branch.get(b)
+        if t and t.region:
+            return t.region
+        return ((branch_info.get(b) or {}).get("region")
+                or _erp_region.get(b) or "Other")
+
+    # SR targets, spread over the SR window's months exactly like the sales
+    # ones. THE SOURCE IS THE SERVICE LOAD AOP tab's 'Service Request Closure
+    # (Nos.)' table (pms_service_load_targets) — the same monthly per-branch
+    # figure the Annual Reports' Service Load sheet is measured against, so the
+    # business sets this closure target in exactly one place.
+    sr_tgt_q = db.query(PmsServiceLoadTarget).filter(
+        PmsServiceLoadTarget.target_month.in_(all_months))
+    if scope is not None:
+        sr_tgt_q = sr_tgt_q.filter(PmsServiceLoadTarget.branch_id.in_(scope))
+    sr_full, sr_till = {}, {}
+    for t in sr_tgt_q.all():
+        b = _norm_branch_id(t.branch_id)
+        info = month_by_rt["sr"].get(t.target_month)
+        if not b or info is None:
+            continue                 # month beyond the SR window
+        region = _region_for(b)
+        wd = _wd_of(info, region)
+        ratio = min(_ov_of(info, region), wd) / wd if wd else 0
+        val = float(t.sr_target or 0)
+        sr_full[b] = sr_full.get(b, 0.0) + val
+        sr_till[b] = sr_till.get(b, 0.0) + val * ratio
+
+    sr_rows = []
+    for b in sorted(set(sr_full) | set(sr_agg), key=_branch_sort_key):
+        t = info_by_branch.get(b)
+        agg = sr_agg.get(b) or {"closed_till": 0, "closed_on": 0, "allocated": 0}
+        info = branch_info.get(b, {})
+        region = _region_for(b)
+        period_target = sr_full.get(b, 0.0)
+        reg_days = total_days_reg["sr"]["KA" if region.upper() == "KA" else "MH"]
+        daily = period_target / reg_days if period_target else 0.0
+        target_till = sr_till.get(b, 0.0)
+        closed_till = agg["closed_till"]
+        sr_rows.append({
+            "responsible_person": (t.responsible_person if t else None) or "—",
+            "branch_id": b,
+            "branch_name": (t.branch_name if t and t.branch_name else info.get("branch_name"))
+                           or _erp_name.get(b) or b,
+            "region": region,
+            # Same key names as the sales rows so the page's table renderer and
+            # the Excel export treat all three the same way.
+            "monthly_target": round(period_target, 1),
+            "daily_target": round(daily, 2),
+            "achieved_on": agg["closed_on"],
+            "target_till": round(target_till, 1),
+            "achieved_till": closed_till,
+            "invoice_count_till": agg["allocated"],     # the 'Allocated' column
+            "pct_achieved": round(closed_till / target_till * 100, 1) if target_till else None,
+            "short_fall_till": round(target_till - closed_till, 1),
+            "balance_month": round(period_target - closed_till, 1),
+        })
+
     total_spare = round(sum(r["achieved_till"] for r in part_rows), 2)
     total_labour = round(sum(r["achieved_till"] for r in labour_rows), 2)
     total_spare_target = round(sum(f["part"] for f in full_target.values()), 2)
     total_labour_target = round(sum(f["labour"] for f in full_target.values()), 2)
+    # SR closure totals — the sum of the SAME rows the table shows, so a branch
+    # user's tiles add up their own branches and nobody else's.
+    total_sr_target = round(sum(r["monthly_target"] for r in sr_rows), 1)
+    total_sr_closed = sum(r["achieved_till"] for r in sr_rows)
+    total_sr_allocated = sum(r["invoice_count_till"] for r in sr_rows)
     total_target = total_spare_target + total_labour_target
     # An invoice no never appears under both record types, so the two sides'
     # distinct counts simply add up.
@@ -2918,6 +5033,7 @@ def _generate_report(db: Session, as_on: date, from_date: date = None,
         "as_on": to_date.isoformat(),
         "as_on_part": to_by["part"].isoformat(),
         "as_on_labour": to_by["labour"].isoformat(),
+        "as_on_sr": to_by["sr"].isoformat(),
         "from_date": from_date.isoformat(),
         "month": to_date.strftime("%Y-%m"),
         "days_in_month": max(total_days_rt.values()),
@@ -2928,12 +5044,17 @@ def _generate_report(db: Session, as_on: date, from_date: date = None,
             "total_labour_sale": total_labour,
             "total_spare_target": total_spare_target,
             "total_labour_target": total_labour_target,
+            "total_sr_target": total_sr_target,
+            "total_sr_closed": total_sr_closed,
+            "total_sr_allocated": total_sr_allocated,
             "overall_pct_achieved": round((total_spare + total_labour) / total_target * 100, 1)
                                      if total_target else None,
             "total_invoices": total_invoices,
         },
         "spare_rows": part_rows,
         "labour_rows": labour_rows,
+        # SR closures from the EFSR file — same row shape as the two above
+        "sr_rows": sr_rows,
         # Region-wise carries the AOP target too (targets exist per branch, and
         # every branch belongs to exactly one region) — Segment / Service Head
         # have no target dimension in the AOP Master, so they stay sales-only.
@@ -2950,9 +5071,24 @@ def _generate_report(db: Session, as_on: date, from_date: date = None,
     }
 
 
-def fy_summary_report(db: Session, fy_start: int):
-    """Cached wrapper — see _fy_summary_report."""
-    return _cached(db, ("fy", fy_start), lambda: _fy_summary_report(db, fy_start))
+def fy_summary_report(db: Session, fy_start: int, allowed_branches=None):
+    """Cached wrapper — see _fy_summary_report.
+
+    `allowed_branches` (None = every branch) trims the branch rows afterwards:
+    every figure on this sheet is per branch and per month, so cutting the rows
+    IS cutting the report — the page adds the totals up itself. The Sales &
+    Labour page hides this report from a branch user altogether; the trim is
+    here so calling the endpoint directly cannot go round that."""
+    data = _cached(db, ("fy", fy_start), lambda: _fy_summary_report(db, fy_start))
+    scope = _scope_ids(allowed_branches)
+    if scope is None or not data or not data.get("success"):
+        return data
+    ok = set(scope)
+    rows = [r for r in (data.get("rows") or [])
+            if _norm_branch_id(r.get("branch_id")) in ok]
+    if len(rows) == len(data.get("rows") or []):
+        return data                        # nothing to hide — the cached payload
+    return dict(data, rows=rows)
 
 
 def _fy_summary_report(db: Session, fy_start: int):
@@ -3078,8 +5214,14 @@ def _fy_summary_report(db: Session, fy_start: int):
 
 
 def branch_detail_report(db: Session, as_on: date, from_date: date,
-                         branch_ids: list):
-    """Cached wrapper — see _branch_detail_report."""
+                         branch_ids: list, allowed_branches=None):
+    """Cached wrapper — see _branch_detail_report. `allowed_branches` is only
+    read for the three-month window (the route has already cut `branch_ids`
+    down to the caller's branches)."""
+    floor = _scoped_floor(db, _scope_ids(allowed_branches))
+    if floor is not None:
+        as_on = max(as_on, floor)
+        from_date = floor if from_date is None else max(from_date, floor)
     key = ("bdetail", as_on, from_date,
            tuple(sorted({_norm_branch_id(b) for b in (branch_ids or []) if str(b).strip()})))
     return _cached(db, key, lambda: _branch_detail_report(db, as_on, from_date, branch_ids))
@@ -3381,7 +5523,8 @@ def _scope_report_to_branches(data, allowed, emp_keys=(), branch_keys=()):
 
 # The record arrays of each report, by what their first element indexes.
 EP_EMP_RECORDS = ("sr_records", "lead_records", "conv_records",
-                  "present_records", "allocate_records", "cdi_records")
+                  "present_records", "allocate_records", "cdi_records",
+                  "attendance_records")
 EP_BRANCH_RECORDS = ("other_conv_records",)
 SRAR_EMP_RECORDS = ("alloc_records", "close_records")
 SRAR_BRANCH_RECORDS = ("open_records",)
@@ -3428,6 +5571,12 @@ def _employee_productivity_data(db: Session):
                          close date: the SR is closed in the office, often in a
                          later batch, while the task end date is when the
                          engineer finished the job in the field.
+      HR wise
+      attendance      -> HR's own days worked for the month, off the attendance
+                         file uploaded on the SE UID Master. A WHOLE-MONTH
+                         figure, so it is sent per month and the report offers
+                         the column only when the picked period IS exactly one
+                         uploaded calendar month.
       Productivity    -> Total SR / Working Days (NOT / Days Present: the days
                          present figure is attendance, the target is the
                          available man-days from the AOP master)
@@ -3466,8 +5615,9 @@ def _employee_productivity_data(db: Session):
     headIdx, count]], allocate_records[[empIdx, isoDate, efsrHeadIdx, count]],
     lead_records[[empIdx, isoLeadCreatedDate, catIdx, count]],
     conv_records[[empIdx, isoOrderCreationDate, spare, labour]],
-    other_conv_records[[BRANCHIdx, isoOrderCreationDate, spare, labour]] and
-    present_records[[empIdx, isoTaskEndDate]] — so the period / week
+    other_conv_records[[BRANCHIdx, isoOrderCreationDate, spare, labour]],
+    present_records[[empIdx, isoTaskEndDate]] and
+    attendance_records[[empIdx, 'YYYY-MM', daysWorked]] — so the period / week
     windowing, branch rollups and every derived figure are recomputed
     client-side without a refetch."""
     from app.models.customer_model import (ResponseTimeMaxTTR, LMSData,
@@ -3823,6 +5973,7 @@ def _employee_productivity_data(db: Session):
                 "sr_records": [], "lead_records": [], "conv_records": [],
                 "other_conv_records": [], "present_records": [],
                 "allocate_records": [], "cdi_records": [],
+                "attendance_records": [], "attendance_months": [],
                 "working_days": _working_days_master(db)}
 
     # ---- DAYS PRESENT ON TASK END (SR TASK END DATE in the MaxTTR file) ----
@@ -3855,6 +6006,55 @@ def _employee_productivity_data(db: Session):
             min_d = d
         if max_d is None or d > max_d:
             max_d = d
+
+    # ---- HR WISE ATTENDANCE (the attendance file, per month) ---------------
+    # HR's own days worked, off the file uploaded on the SE UID Master, through
+    # the SAME function SE Performance quotes (_se_performance_hr_days) — the
+    # two pages show one engineer's attendance for one month and must never
+    # disagree, so the day-file-beats-summary rule and the half-day arithmetic
+    # live in one place.
+    #
+    # A WHOLE-MONTH figure with no day detail, so it is sent per month and never
+    # per date: the report offers the column only when the picked period is
+    # exactly one uploaded calendar month, because a part month would divide
+    # that month's work by a full month of attendance and read low.
+    #
+    # attendance_months is every month on record even where nobody here matched.
+    # It is how the page tells 'HR says he was never in' apart from 'nobody has
+    # uploaded that month yet' — a missing file must never mark a man absent.
+    #
+    # Like Days Present, attendance NEVER creates a roster row: HR pays 173
+    # people and this report is the ~120 who appear in the service files, so an
+    # accountant's attendance simply resolves to nobody and is dropped.
+    def _att_employee(e_code, uid, name):
+        """The employee row an attendance line belongs to, or None.
+
+        UID FIRST, letters-only NAME SECOND — the same order, and for the same
+        reason, as the import that wrote the row: HR writes short names ('Karan
+        Sonare') where the service files hold full ones ('KARAN GANESH
+        SONARE'), so the UID is the join that survives a spelling. E CODE, the
+        strong key SE Performance leads with, is no use here — it exists only on
+        the attendance rows themselves, and this report has nothing to match it
+        against.
+
+        An engineer with rows in more than one branch gets the month on his
+        HOME branch's row (the one pinned on the SE UID Master) — attendance is
+        one man's month and splitting it across branches would invent days.
+        """
+        tkeys = []
+        u = (uid or "").strip().upper()
+        if u and "PENDING" not in u and "HOLD" not in u:
+            tkeys.extend(tights_of_uid.get(u) or [])
+        tkeys.append(_tight(_name_key(name)))
+        for t in tkeys:
+            cands = by_tight_key.get(t)
+            if cands:
+                return _pick(cands, master_branch.get(t))
+        return None
+
+    hr_days, att_months, _att_codes = _se_performance_hr_days(db, _att_employee)
+    attendance_records = sorted([ei, m, d] for ei, per in hr_days.items()
+                                for m, d in per.items())
 
     # ---- branch groups (first column) --------------------------------------
     # The configured groups first (only their branches that actually have
@@ -3899,6 +6099,8 @@ def _employee_productivity_data(db: Session):
             "present_records": present_records,
             "allocate_records": allocate_records,
             "cdi_records": cdi_records,
+            "attendance_records": attendance_records,
+            "attendance_months": att_months,
             "working_days": _working_days_master(db)}
 
 

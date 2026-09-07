@@ -4,7 +4,7 @@ import { useState, useEffect, lazy, Suspense } from 'react';
 
 import Navbar from './components/Navbar';
 // PMS route guards — module access + the AOP & Master view/edit right.
-import { canViewAop, canAccessPmsPage, canAccessQuotationTracker } from './utils/pagePermission';
+import { canViewAop, canAccessPmsPage, canAccessQuotationTracker, canAccessDataUpload } from './utils/pagePermission';
 // Follows the user across pages while a background upload is still running.
 import UploadGuard from './components/UploadGuard';
 // Login is eager: it is the first screen an unauthenticated user sees, so we
@@ -369,9 +369,11 @@ function Layout() {
         </ProtectedRoute>
       } />
 
-      {/* Import Page - ONLY master_admin can access */}
+      {/* Import (Data Upload) Page — Master Admin, plus any branch admin /
+          employee granted "Data Upload Access" from Profile (the per-file
+          list set there says which files they may upload). */}
       <Route path="/import" element={
-        <ProtectedRoute allowedRoles={['master_admin']}>
+        <ProtectedRoute customCheck={canAccessDataUpload}>
           <Import />
         </ProtectedRoute>
       } />

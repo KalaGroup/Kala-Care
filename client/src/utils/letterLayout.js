@@ -12,18 +12,20 @@ export const LETTER_BODY_W = 780;                 // px == 210mm (A4 width)
 export const PX_PER_MM = LETTER_BODY_W / 210;     // ≈3.714
 
 // ── Side margins ──────────────────────────────────────────────────────────────
-// The letterhead bands are full-bleed; only the TEXT block is inset. 20mm each
-// side is the standard business-letter margin. (It used to be 28px ≈ 7.5mm, which
-// ran the text wider than the letterhead's own address block underneath it.)
-export const LETTER_SIDE_MM = 20;
-export const LETTER_SIDE_PAD = Math.round(LETTER_SIDE_MM * PX_PER_MM);  // 74px
+// The letterhead bands are full-bleed; only the TEXT block is inset. 15mm each
+// side: 20mm was correct business-letter practice but left the A4 sheet looking
+// narrow and short of the letterhead's own width, and 28px (≈7.5mm) before that
+// ran the text WIDER than the letterhead's address block underneath it. 15mm
+// sits between the two and still clears that block.
+export const LETTER_SIDE_MM = 15;
+export const LETTER_SIDE_PAD = Math.round(LETTER_SIDE_MM * PX_PER_MM);  // 56px
 export const LETTER_TOP_PAD = 0;                                        // the pull below sets the top gap
 export const LETTER_BOTTOM_PAD = 24;
 export const LETTER_BODY_PADDING =
     `${LETTER_TOP_PAD}px ${LETTER_SIDE_PAD}px ${LETTER_BOTTOM_PAD}px`;
 
 // Usable text width (px) — the width the References table is chunked against.
-export const LETTER_TEXT_W = LETTER_BODY_W - (2 * LETTER_SIDE_PAD);      // 632px
+export const LETTER_TEXT_W = LETTER_BODY_W - (2 * LETTER_SIDE_PAD);      // 668px
 
 // ── Gap under the letterhead ──────────────────────────────────────────────────
 // letter-header-band.png carries ≈12.6mm of blank paper below the logos, which
@@ -59,6 +61,12 @@ export const normalizeLetterBodyHtml = (html) => {
         ));
         let changed = false;
         roots.forEach((root) => {
+            // paper is white, whatever is behind it
+            const rootStyle = root.getAttribute('style') || '';
+            if (!/(^|;)\s*background\s*:/.test(rootStyle)) {
+                root.setAttribute('style', `${rootStyle};background:#ffffff`);
+                changed = true;
+            }
             Array.from(root.children).forEach((child) => {
                 const style = child.getAttribute('style') || '';
                 // the body wrapper: the one direct child div carrying a padding

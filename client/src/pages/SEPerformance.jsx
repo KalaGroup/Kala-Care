@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import {
   ClipboardDocumentCheckIcon, CalendarDaysIcon, ChevronDownIcon,
+  ChevronLeftIcon, ChevronRightIcon,
 } from '@heroicons/react/24/outline';
 import SEPerformanceReport from '../components/SEPerformanceReport';
 
@@ -11,17 +10,28 @@ import SEPerformanceReport from '../components/SEPerformanceReport';
 // PMS → SE Performance
 //
 // The Annexure I "Service Engineer Performance Commitment & Accountability
-// Matrix", per engineer: the twelve commitments he signed, what he actually
+// Matrix", per engineer: the commitments he signed, what he actually
 // did against them over the selected period, what the shortfall is worth, and
 // the printable signed form.
 //
-// This page owns the REPORTING PERIOD; the branch board, the engineer report
-// and the three panels live in components/SEPerformanceReport.
+// This page owns the REPORTING MONTH; the branch board, the engineer report
+// and the panels live in components/SEPerformanceReport.
 //
-// Backend: GET /pms/report/se-performance — the ROSTER only (real branches,
-// real engineers from the SE UID Master, real trainings from the Training
-// Report). Every commitment FIGURE is generated in the browser for now; the
-// counting rules are not agreed yet. See utils/sePerformanceModel.js.
+// THE PERIOD IS A WHOLE MONTH AND NOTHING ELSE. Every commitment on the signed
+// form is written "/ Month" — 60 SRs a month, ₹1,50,000 a month — so a period
+// that is not a month is a period the form cannot be read against. The picker
+// therefore offers a year and a month and never a date range; it stops at the
+// month now running, because a monthly target cannot be judged against a month
+// that has not finished happening; and it opens on LAST month, which is the
+// one a manager is actually reviewing.
+//
+// Backend: GET /pms/report/se-performance — real branches with their region,
+// the TRAINING REPORT's ACTIVE engineers with their UID NO and every training
+// on record, HR's EMPLOYEE CODE joined on (the employee id the SE UID Master
+// shows — NOT the training file's KOEL ticket number), and SR CLOSED day by
+// day out of the 'Response Time & MaxTTR Details' import, counted the way
+// Employee Productivity counts it. The other commitment figures are still
+// generated in the browser; see sePerformanceModel.js.
 // ============================================================================
 
 const API = import.meta.env.VITE_BACKEND_URL;
@@ -35,34 +45,36 @@ const authHeaders = () => {
   return { 'user-id': String(u.user_id || ''), 'user-role': u.role || '' };
 };
 
-// ---- date helpers (ISO strings, local time) ----
-const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const fmtDayYr = (iso) => (iso
-  ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })
-  : '');
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+const MON3 = MONTHS.map((m) => m.slice(0, 3));
+
+// ---- month helpers (ISO strings, local time) ----
+const pad = (n) => String(n).padStart(2, '0');
+const firstOf = (y, m) => `${y}-${pad(m + 1)}-01`;
+const lastOf = (y, m) => `${y}-${pad(m + 1)}-${pad(new Date(y, m + 1, 0).getDate())}`;
+/** The month before a given one, as {y, m}. */
+const prevMonth = (y, m) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 });
 
 const SEPerformance = () => {
   const [roster, setRoster] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Reporting period — the same picker every PMS report uses. Unlike the other
-  // reports there is no matched data range to clamp to yet, so the period is
-  // free and defaults to last month.
-  const today = new Date();
-  const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-  const [fromDate, setFromDate] = useState(isoOf(lastMonthStart));
-  const [toDate, setToDate] = useState(isoOf(lastMonthEnd));
-  const [showRangePicker, setShowRangePicker] = useState(false);
-  const [activePeriod, setActivePeriod] = useState('last_month');
-  const [pickStart, setPickStart] = useState(lastMonthStart);
-  const [pickEnd, setPickEnd] = useState(lastMonthEnd);
-  const fyNow = (() => { const d = new Date(); return d.getMonth() + 1 >= 4 ? d.getFullYear() : d.getFullYear() - 1; })();
-  const [quickFy, setQuickFy] = useState(fyNow);
-  const [fyOpen, setFyOpen] = useState(false);
-  const fyChoices = [];
-  for (let y = fyNow - 5; y <= fyNow + 10; y++) fyChoices.push(y);
+  // ---- the reporting month -------------------------------------------------
+  // LAST month by default: the current one is still being worked, and half a
+  // month measured against a whole month's commitment reads as a shortfall
+  // that is not one.
+  const now = new Date();
+  const thisY = now.getFullYear();
+  const thisM = now.getMonth();
+  const [sel, setSel] = useState(() => prevMonth(thisY, thisM));
+  const [open, setOpen] = useState(false);
+  const [browseY, setBrowseY] = useState(sel.y);   // the year the panel is showing
+  const boxRef = useRef(null);
+
+  const fromDate = firstOf(sel.y, sel.m);
+  const toDate = lastOf(sel.y, sel.m);
 
   const load = useCallback(async (quiet = false) => {
     setLoading(true);
@@ -82,61 +94,51 @@ const SEPerformance = () => {
 
   useEffect(() => { load(true); }, [load]);
 
-  const QUICK_OPTIONS = [
-    { key: 'fy', label: 'Financial Year' },
-    { key: 'current_month', label: 'Current Month' },
-    { key: 'last_month', label: 'Last Month' },
-    { key: 'last_quarter', label: 'Last Quarter' },
-    { key: 'last_6m', label: 'Last 6 Months' },
-    { key: 'last_year', label: 'Last 12 Months' },
-  ];
+  // ---- which years the picker offers --------------------------------------
+  // Bounded by the DATA, not by the calendar: the first month the MaxTTR file
+  // has an SR closed in, up to the year now running. Offering 2019 against a
+  // file that starts in 2024 is offering five years of empty reports.
+  const minYear = useMemo(() => {
+    const f = roster?.meta?.sr?.from;
+    const y = f ? Number(f.slice(0, 4)) : NaN;
+    return Number.isFinite(y) ? Math.min(y, sel.y) : Math.min(thisY - 2, sel.y);
+  }, [roster, sel.y, thisY]);
 
-  const applyRange = (f, t, key) => {
-    setFromDate(f); setToDate(t);
-    setPickStart(new Date(`${f}T00:00:00`)); setPickEnd(new Date(`${t}T00:00:00`));
-    setActivePeriod(key); setShowRangePicker(false);
-  };
+  // a month that has not finished happening cannot be judged against a monthly
+  // commitment — the one now running is offered, everything after it is not
+  const isFuture = (y, m) => (y > thisY || (y === thisY && m > thisM));
+  const canPrevYear = browseY > minYear;
+  const canNextYear = browseY < thisY;
 
-  const applyQuick = (key) => {
-    const d = new Date();
-    if (key === 'current_month') {
-      applyRange(isoOf(new Date(d.getFullYear(), d.getMonth(), 1)),
-        isoOf(new Date(d.getFullYear(), d.getMonth() + 1, 0)), key);
-    } else if (key === 'last_month') {
-      applyRange(isoOf(new Date(d.getFullYear(), d.getMonth() - 1, 1)),
-        isoOf(new Date(d.getFullYear(), d.getMonth(), 0)), key);
-    } else if (key === 'last_quarter') {
-      const q = Math.floor(d.getMonth() / 3) * 3;
-      applyRange(isoOf(new Date(d.getFullYear(), q - 3, 1)), isoOf(new Date(d.getFullYear(), q, 0)), key);
-    } else if (key === 'last_6m') {
-      applyRange(isoOf(new Date(d.getFullYear(), d.getMonth() - 6, 1)),
-        isoOf(new Date(d.getFullYear(), d.getMonth(), 0)), key);
-    } else if (key === 'last_year') {
-      applyRange(isoOf(new Date(d.getFullYear(), d.getMonth() - 12, 1)),
-        isoOf(new Date(d.getFullYear(), d.getMonth(), 0)), key);
-    }
-  };
+  // the panel always opens on the year that is selected, wherever it was left
+  useEffect(() => { if (open) setBrowseY(sel.y); }, [open, sel.y]);
 
-  // Financial Year preset (Apr..Mar) — the year this business plans in, and the
-  // year the report's quarterly and yearly views fold to.
-  const applyFy = (y) => {
-    setQuickFy(y);
-    applyRange(`${y}-04-01`, `${y + 1}-03-31`, 'fy');
-  };
+  // click away closes, exactly as the granularity picker in the report does
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [open]);
 
-  const applyCustomRange = () => {
-    if (!pickStart || !pickEnd) return;
-    applyRange(isoOf(pickStart), isoOf(pickEnd), 'custom');
+  const pick = (y, m) => {
+    if (isFuture(y, m)) return;
+    setSel({ y, m });
+    setOpen(false);
   };
 
   const engineers = roster?.engineers?.length || 0;
-  const branches = roster?.branches?.length || 0;
+  // the branches that actually CARRY an engineer — the payload lists every
+  // branch the masters know, and the explorer drops the empty ones, so
+  // counting the payload's list here would promise rows that are not drawn
+  const branches = new Set((roster?.engineers || [])
+    .map((e) => e.branch_id).filter(Boolean)).size;
 
   return (
     <div className="min-h-screen font-sans">
       <div className="max-w-[1500px] mx-auto px-3 sm:px-5 pb-2 max-md:px-2">
 
-        {/* ===== Hero header — the reporting-period picker lives on its RIGHT ===== */}
+        {/* ===== Hero header — the month picker lives on its RIGHT ===== */}
         <div className="rounded-2xl px-3 sm:px-5 py-3 mb-3 text-white relative sep-hide-print"
           style={{ background: `linear-gradient(120deg, ${themeColor} 0%, ${themeDark} 100%)` }}>
           <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
@@ -153,109 +155,73 @@ const SEPerformance = () => {
                 <p className="text-[11px] text-white/70 leading-tight">
                   {loading ? 'Loading…'
                     : error ? 'Could not load the roster'
-                      : <>Annexure&nbsp;I commitment &amp; accountability matrix · {engineers} engineers across {branches} branches</>}
+                      : <>Annexure&nbsp;I commitment &amp; accountability matrix · {engineers} active engineers across {branches} branches</>}
                 </p>
               </div>
             </div>
 
-            {/* Period picker — opens on hover, click still toggles. */}
-            <div className="relative w-[280px] max-w-full"
-              onMouseEnter={() => setShowRangePicker(true)}
-              onMouseLeave={() => { if (!fyOpen) setShowRangePicker(false); }}>
-              <button onClick={() => { setFyOpen(false); setShowRangePicker(!showRangePicker); }}
+            {/* ---- the month picker: a year, and the twelve months of it ----
+                Opens on hover like the other PMS pickers, and a click on a
+                month applies it and closes — there is no Apply button because
+                there is nothing to compose: one click IS the whole choice. */}
+            <div ref={boxRef} className="relative w-[240px] max-w-full"
+              onMouseEnter={() => setOpen(true)}
+              onMouseLeave={() => setOpen(false)}>
+              <button onClick={() => setOpen(!open)}
                 className="w-full flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-white shadow-md hover:bg-white/90 transition-all"
                 style={{ color: themeColor }}>
                 <CalendarDaysIcon className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="truncate">
-                  {fromDate && toDate ? `${fmtDayYr(fromDate)} → ${fmtDayYr(toDate)}` : 'Select period'}
-                </span>
-                <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${showRangePicker ? 'rotate-180' : ''}`} />
+                <span className="truncate">{MONTHS[sel.m]} {sel.y}</span>
+                <ChevronDownIcon className={`h-3 w-3 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
               </button>
 
-              {showRangePicker && (
+              {open && (
                 /* pt-2 (not a margin) keeps the hover unbroken across the gap */
                 <div className="absolute z-50 left-0 right-0 sm:left-auto sm:right-0 top-full pt-2">
-                  <div className="sm:w-[440px] max-w-[92vw] bg-white rounded-xl shadow-xl border border-gray-200 text-gray-800">
-                    <div className="p-3 max-h-[75vh] overflow-y-auto">
-                      <div className="flex flex-col sm:flex-row gap-4">
-                        <div className="sm:w-[34%]">
-                          <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">Quick Select</h3>
-                          <div className="space-y-1.5">
-                            {QUICK_OPTIONS.map((o) => (o.key === 'fy' ? (
-                              <div key={o.key} className="relative">
-                                <button type="button" onClick={() => setFyOpen((v) => !v)}
-                                  className={`w-full relative pl-2 pr-6 py-1.5 rounded-lg text-xs font-medium transition-all text-center ${activePeriod === 'fy'
-                                    ? 'text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'}`}
-                                  style={activePeriod === 'fy' ? { backgroundColor: themeColor } : {}}>
-                                  FY {quickFy}–{String(quickFy + 1).slice(2)}
-                                  <ChevronDownIcon className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 transition-transform ${fyOpen ? 'rotate-180' : ''} ${activePeriod === 'fy' ? 'text-white' : 'text-gray-500'}`} />
-                                </button>
-                                {fyOpen && (
-                                  <div className="mt-1 max-h-36 overflow-y-auto bg-white border border-gray-200 rounded-lg">
-                                    {fyChoices.map((y) => (
-                                      <button key={y} type="button"
-                                        ref={y === quickFy ? (el) => {
-                                          if (el && el.parentElement) {
-                                            el.parentElement.scrollTop = Math.max(0, el.offsetTop - el.parentElement.clientHeight / 2);
-                                          }
-                                        } : undefined}
-                                        onClick={() => { setFyOpen(false); applyFy(y); }}
-                                        className={`block w-full px-2 py-1.5 text-xs text-center hover:bg-gray-100 ${y === quickFy ? 'font-semibold text-white' : 'text-gray-700'}`}
-                                        style={y === quickFy ? { backgroundColor: themeColor } : {}}>
-                                        FY {y}–{String(y + 1).slice(2)}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <button key={o.key} onClick={() => applyQuick(o.key)}
-                                className={`w-full px-2 py-1.5 rounded-lg text-xs font-medium transition-all text-center ${activePeriod === o.key
-                                  ? 'text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'}`}
-                                style={activePeriod === o.key ? { backgroundColor: themeColor } : {}}>
-                                {o.label}
-                              </button>
-                            )))}
-                          </div>
-                        </div>
-
-                        <div className="sm:w-[66%]">
-                          <h3 className="text-xs font-semibold text-gray-800 mb-2 text-center">Custom Range</h3>
-                          <div className="flex gap-2 mb-2">
-                            <div className="flex-1">
-                              <label className="block text-[11px] text-gray-500 mb-0.5 text-center">Start Date</label>
-                              <div className={`px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate ${pickStart ? 'font-semibold text-gray-900' : 'text-gray-400'}`}>
-                                {pickStart ? pickStart.toLocaleDateString('en-GB') : 'Not selected'}
-                              </div>
-                            </div>
-                            <div className="flex-1">
-                              <label className="block text-[11px] text-gray-500 mb-0.5 text-center">End Date</label>
-                              <div className={`px-1.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-center truncate ${pickEnd ? 'font-semibold text-gray-900' : 'text-gray-400'}`}>
-                                {pickEnd ? pickEnd.toLocaleDateString('en-GB') : 'Not selected'}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="border border-gray-200 rounded-lg p-1 bg-gray-50/50 flex justify-center">
-                            <DatePicker
-                              selected={pickStart}
-                              onChange={(dates) => { const [s, e] = dates; setPickStart(s); setPickEnd(e); }}
-                              startDate={pickStart} endDate={pickEnd}
-                              selectsRange inline calendarClassName="custom-calendar" dateFormat="dd/MM/yyyy" />
-                          </div>
-                          <div className="flex gap-2 mt-2.5">
-                            <button onClick={() => setShowRangePicker(false)}
-                              className="flex-1 px-2 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-xs font-medium">
-                              Cancel
-                            </button>
-                            <button onClick={applyCustomRange} disabled={!pickStart || !pickEnd}
-                              className="flex-1 px-2 py-1.5 text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium"
-                              style={{ backgroundColor: themeColor }}>
-                              Apply
-                            </button>
-                          </div>
-                        </div>
-                      </div>
+                  <div className="w-[268px] max-w-[92vw] bg-white rounded-xl shadow-xl border border-gray-200 text-gray-800">
+                    {/* the year, with its own two arrows */}
+                    <div className="flex items-center justify-between px-2.5 py-2 border-b border-gray-100">
+                      <button type="button" disabled={!canPrevYear}
+                        onClick={() => canPrevYear && setBrowseY(browseY - 1)}
+                        className="p-1 rounded-md text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title={canPrevYear ? `Go to ${browseY - 1}` : 'No data before this year'}>
+                        <ChevronLeftIcon className="h-4 w-4" />
+                      </button>
+                      <span className="text-sm font-bold tabular-nums" style={{ color: themeColor }}>{browseY}</span>
+                      <button type="button" disabled={!canNextYear}
+                        onClick={() => canNextYear && setBrowseY(browseY + 1)}
+                        className="p-1 rounded-md text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title={canNextYear ? `Go to ${browseY + 1}` : 'That year has not happened yet'}>
+                        <ChevronRightIcon className="h-4 w-4" />
+                      </button>
                     </div>
+
+                    <div className="grid grid-cols-3 gap-1.5 p-2.5">
+                      {MON3.map((mm, i) => {
+                        const on = sel.y === browseY && sel.m === i;
+                        const future = isFuture(browseY, i);
+                        const running = browseY === thisY && i === thisM;
+                        return (
+                          <button key={mm} type="button" disabled={future}
+                            onClick={() => pick(browseY, i)}
+                            title={future ? 'This month has not happened yet'
+                              : running ? 'The month now running — still incomplete'
+                                : `${MONTHS[i]} ${browseY}`}
+                            className={`relative px-2 py-2 rounded-lg text-xs font-semibold transition-all ${on ? 'text-white shadow-sm'
+                              : future ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                                : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'}`}
+                            style={on ? { backgroundColor: themeColor } : {}}>
+                            {mm}
+                            {/* the month in progress is MARKED, not withheld:
+                                it is selectable, it is simply not a full month */}
+                            {running && (
+                              <i className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ${on ? 'bg-white/80' : 'bg-amber-400'}`} />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
                   </div>
                 </div>
               )}
@@ -273,10 +239,12 @@ const SEPerformance = () => {
           <div className="px-3 py-6 text-center text-sm text-red-600">{error}</div>
         ) : !roster?.engineers?.length ? (
           <div className="bg-white rounded-2xl border border-gray-200 px-4 py-10 text-center">
-            <p className="text-sm font-semibold text-gray-800">No engineers on the roster yet</p>
+            <p className="text-sm font-semibold text-gray-800">No active engineers on the roster yet</p>
             <p className="text-xs text-gray-500 mt-1">
-              This report reads the <b>SE UID Master</b> (Profile → PMS). Add engineers there and pin
-              each one to a branch — a row with no branch cannot appear on a branch report.
+              This report reads the <b>Training Report</b> (PMS → Training Report) and shows its
+              <b> Active</b> engineers only. Upload the Training Report there; if it is already
+              uploaded, everybody in it is either marked <b>Inactive</b> or has no employment
+              status set.
             </p>
           </div>
         ) : (

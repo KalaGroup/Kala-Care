@@ -7,6 +7,8 @@ import React, {
   useMemo,
 } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { openInNewTab } from '../utils/openInNewTab';
+import { flattenListMarkers } from '../utils/letterPdfMarkers';
 import { MdEmojiPeople } from "react-icons/md";
 import { BsGraphUpArrow } from "react-icons/bs";
 import { MdOutlineFollowTheSigns } from "react-icons/md";
@@ -65,6 +67,11 @@ import {
 import { FaCheck } from "react-icons/fa";
 import { useInView } from "react-intersection-observer";
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
+import { renderLetterParaHtml, renderLetterParaText } from '../utils/letterRichText';
+import { isFieldEditable } from '../utils/letterFieldLocks';
+import { buildAttachmentPagesHtml, buildAttachmentPageImages } from '../utils/printAttachments';
+import LetterParaEditor from '../components/LetterParaEditor';
+import { SHOW_SERVICE_CYCLE } from '../utils/letterFeatures';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
@@ -364,7 +371,7 @@ const CustomerEng2 = () => {
   const [letterFields, setLetterFields] = useState({
     ref_no: '', date: '', to_name: '', to_address: '', instance_id: '',
     engine_model: '', agreement_no: '', contact: '', email: '',
-    subject: '', start_para: '', end_para: '',
+    subject: '', start_para: '', end_para: '', signature_para: '',
     followup_intro: DEFAULT_FOLLOWUP_INTRO,
     quotation_intro: DEFAULT_QUOTATION_INTRO,
     letterref_intro: DEFAULT_LETTERREF_INTRO,
@@ -3591,7 +3598,7 @@ const CustomerEng2 = () => {
   // Renders the CURRENT letter to a multi-page A4 PDF (base64, no data: prefix). The header band is
   // stamped at the TOP and the footer band at the BOTTOM of EVERY page, so they repeat identically
   // when the letter content grows onto further pages.
-  const generateLetterPdfBase64 = async () => {
+  const generateLetterPdfBase64 = async (mergeAttachments = []) => {
     if (!window.html2canvas) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
     if (!window.jspdf) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
 
@@ -3623,6 +3630,9 @@ const CustomerEng2 = () => {
     holder.className = 'keep-light'; // letter = paper — stays white in dark mode
     holder.innerHTML = buildLetterHtml(false, true, true);
     document.body.appendChild(holder);
+    // html2canvas draws a list's ::marker tiny and above the line —
+    // write the bullets/numbers in as real text first
+    flattenListMarkers(holder);
     normalizeLetterHolderForCanvas(holder);
 
     const imgs = Array.from(holder.querySelectorAll('img'));
@@ -3659,6 +3669,29 @@ const CustomerEng2 = () => {
         if (headerImgDataUrl && headerH > 0) pdf.addImage(headerImgDataUrl, 'PNG', 0, 0, pageW, headerH);
         if (footerImgDataUrl && footerH > 0) pdf.addImage(footerImgDataUrl, 'PNG', 0, pageH - footerH, pageW, footerH);
         pdf.addImage(sliceData, 'JPEG', 0, contentTop, pageW, sliceHmm);
+      }
+
+      // Attachment pages appended INTO the letter PDF — the emailed letter is
+      // then ONE file: each image centred on its own A4 page (shrunk to fit),
+      // each PDF page on its own page (shared util, memoised).
+      if (mergeAttachments && mergeAttachments.length) {
+        try {
+          const attPages = await buildAttachmentPageImages(mergeAttachments);
+          for (const pg of attPages) {
+            pdf.addPage();
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(8);
+            pdf.setTextColor(110);
+            pdf.text(String(pg.label || '').slice(0, 110), 8, 6);
+            if (pg.src && pg.wPx && pg.hPx) {
+              const boxX = 8, boxY = 10;
+              const boxW = pageW - 16, boxH = pageH - boxY - 8;
+              const mmPerPx = Math.min(boxW / pg.wPx, boxH / pg.hPx);
+              const wMm = pg.wPx * mmPerPx, hMm = pg.hPx * mmPerPx;
+              pdf.addImage(pg.src, 'JPEG', boxX + (boxW - wMm) / 2, boxY + (boxH - hMm) / 2, wMm, hMm);
+            }
+          }
+        } catch (e) { /* attachments must never block the letter itself */ }
       }
 
       return pdf.output('datauristring').split(',')[1];
@@ -3708,6 +3741,9 @@ const CustomerEng2 = () => {
     holder.className = 'keep-light'; // letter = paper — stays white in dark mode
     holder.innerHTML = LETTER_PDF_TABLE_CSS + bodyHtml;
     document.body.appendChild(holder);
+    // html2canvas draws a list's ::marker tiny and above the line —
+    // write the bullets/numbers in as real text first
+    flattenListMarkers(holder);
     normalizeLetterHolderForCanvas(holder);
 
     const imgs = Array.from(holder.querySelectorAll('img'));
@@ -3798,6 +3834,9 @@ const CustomerEng2 = () => {
       holder.className = 'keep-light'; // letter = paper — stays white in dark mode
       holder.innerHTML = LETTER_PDF_TABLE_CSS + bodyHtml;
       document.body.appendChild(holder);
+      // html2canvas draws a list's ::marker tiny and above the line —
+      // write the bullets/numbers in as real text first
+      flattenListMarkers(holder);
       normalizeLetterHolderForCanvas(holder);
 
       const innerImgs = Array.from(holder.querySelectorAll('img'));
@@ -3877,15 +3916,22 @@ const CustomerEng2 = () => {
   // Short cover note used as the EMAIL BODY (the full letter rides along as the PDF).
   const buildLetterCoverHtml = () => {
     const f = letterFields;
-    return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111;line-height:1.6;">
-  <p>Dear Sir/Madam,</p>
-  <p>Please find attached the letter${f.subject ? ` regarding <strong>${escapeLetterHtml(f.subject)}</strong>` : ''}${f.ref_no ? ` (Ref No: ${escapeLetterHtml(f.ref_no)})` : ''}.</p>
-  <p>Best regards,<br/>${escapeLetterHtml(COMPANY_FULL)}</p>
-</div>`;
+    /* No colour and no background: the note follows the reader's own client
+       theme. And it is ONE block, not a run of <p>s ending in a standalone
+       sign-off: Gmail folds a trailing block that repeats across messages
+       into "Show quoted text", which was hiding the signature. Keeping the
+       whole note contiguous — and carrying the ref no, which differs every
+       time — leaves it nothing to collapse. */
+    return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;">
+Dear Sir/Madam,<br><br>Please find attached the letter${f.subject ? ` regarding <strong>${escapeLetterHtml(f.subject)}</strong>` : ''}${f.ref_no ? ` (Ref No: ${escapeLetterHtml(f.ref_no)})` : ''}.<br><br>Best regards,<br>${escapeLetterHtml(COMPANY_FULL)}</div>`;
   };
 
   // True when the selected format's product is CSP — match is now "contains CSP"
   // (product name trimmed + upper-cased, so "CSP", "CSP Renewal", "KOEL CSP" all qualify).
+  /* Did the Letter Master lock this box? An unset flag means editable, so a
+     format saved before the locks existed behaves exactly as before. */
+  const canEditLetterField = (key) => isFieldEditable(selectedLetterFormat, key);
+
   const isCspLetter = () =>
     (selectedLetterFormat?.products || []).some(p => (p || '').trim().toUpperCase().includes('CSP'));
 
@@ -4035,7 +4081,14 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     } catch (e) { /* non-blocking */ }
   };
 
-  const selectLetterFormat = async (fmt) => {
+      /* The engine-model lookup lives on the welcome-letter router, which reads
+       the signed-in user from headers like every other call here. */
+    const letterAuthHeaders = () => {
+        const u = JSON.parse(sessionStorage.getItem('user') || '{}');
+        return { 'user-id': String(u.user_id || ''), 'user-role': u.role || '' };
+    };
+
+const selectLetterFormat = async (fmt) => {
     setSelectedLetterFormat(fmt);
     // Seed with the metadata-only defaults so names/sizes show instantly…
     setLetterAttachments((fmt.default_attachments || []).map(a => ({ ...a })));
@@ -4055,6 +4108,37 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         setLetterAttachmentsHydrating(false);
       });
     }
+        // The format may opt in to the shared engine-model master (Letter Master
+        // -> Model-wise Attachments, the same mapping the Welcome Letter uses).
+        // When it does, the file mapped to THIS customer's engine model is added
+        // on top of the defaults; an unmapped model simply adds nothing.
+        if (fmt.use_model_attachments) {
+            const model = customerCompleteData?.asset_detailed?.[0]?.engine_model || '';
+            if (String(model).trim()) {
+                setLetterAttachmentsHydrating(true);
+                fetch(`${API_BASE_URL}/welcome-letter/model-attachment?engine_model=${encodeURIComponent(String(model).trim())}&content=1`,
+                    { headers: letterAuthHeaders() })
+                    .then(r => (r.ok ? r.json() : null))
+                    .then(d => {
+                        if (d && d.found && d.content) {
+                            setLetterAttachments(prev => (
+                                prev.some(a => a.name === d.file_name)
+                                    ? prev
+                                    : [...prev, {
+                                        name: d.file_name,
+                                        content: d.content,
+                                        type: d.content_type || 'application/octet-stream',
+                                        size: d.file_size || 0,
+                                        model_wise: true,
+                                    }]
+                            ));
+                        }
+                    })
+                    .catch(() => { })
+                    .finally(() => setLetterAttachmentsHydrating(false));
+            }
+        }
+
 
     // CSP-only Service Cycle defaults, seeded from the Letter Master format.
     // Pre-load the format's default rows so they're ready, but DO NOT auto-tick
@@ -4118,9 +4202,12 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
       agreement_no: v.agreement_no,
       contact: v.contact,
       email: v.email,
-      subject: fmt?.format_type_name || '',
+      // the subject is its own field now; older formats fall back to the name
+      subject: fmt?.subject || fmt?.format_type_name || '',
       start_para: startPara,
       end_para: endPara,
+      signature_para: (fmt && fmt.signature_para)
+        ? applyLetterPlaceholders(fmt.signature_para, v) : '',
       followup_intro: (prev.followup_intro && prev.followup_intro.trim()) ? prev.followup_intro : DEFAULT_FOLLOWUP_INTRO,
       quotation_intro: (prev.quotation_intro && prev.quotation_intro.trim()) ? prev.quotation_intro : DEFAULT_QUOTATION_INTRO,
       letterref_intro: (prev.letterref_intro && prev.letterref_intro.trim()) ? prev.letterref_intro : DEFAULT_LETTERREF_INTRO,
@@ -4319,8 +4406,13 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
 
   // Generic editable table used by all three blocks in Step 2
   const renderLetterEditTable = ({ cols, hiddenCols, setHiddenCols, rows, rowId, getCell, onCellChange, emptyText }) => {
-    const visible = cols.filter(c => !hiddenCols.includes(c.key));
-    const hidden = cols.filter(c => hiddenCols.includes(c.key));
+    /* Engagement Details locked in the Letter Master: the sender still
+       chooses WHICH records go in, but the table prints as it stands — no
+       editing a cell, no dropping a column. So a locked table shows every
+       column, whatever a draft may have hidden earlier. */
+    const engEditable = canEditLetterField('engagement_detail_fields');
+    const visible = engEditable ? cols.filter(c => !hiddenCols.includes(c.key)) : cols;
+    const hidden = engEditable ? cols.filter(c => hiddenCols.includes(c.key)) : [];
     if (rows.length === 0) return <p className="text-[10px] text-gray-400 mt-1">{emptyText}</p>;
     return (
       <div className="mt-1">
@@ -4332,7 +4424,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
                   <th key={c.key} className="px-2 py-1 text-left font-semibold text-black border-r border-gray-200 whitespace-nowrap">
                     <span className="inline-flex items-center gap-1">
                       {c.label}
-                      {c.removable && (
+                      {c.removable && engEditable && (
                         <button type="button" title={`Remove "${c.label}" from this letter`}
                           onClick={() => setHiddenCols(prev => [...prev, c.key])}
                           className="text-gray-400 hover:text-red-600">
@@ -4351,7 +4443,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
                   <tr key={id} className="border-t border-gray-100">
                     {visible.map(c => (
                       <td key={c.key} className="px-1.5 py-1 border-r border-gray-100 align-middle">
-                        {c.editable ? (
+                        {c.editable && engEditable ? (
                           <input value={getCell(row, c.key)}
                             onChange={(e) => onCellChange(id, c.key, e.target.value)}
                             className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-[11px] text-black" />
@@ -4451,7 +4543,11 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
   // "Label: value" is short enough to share one line three-across inside the letter's
   // text column (PAIR_FIT_LIMIT is derived from it); otherwise 2 per row.
   const buildReferencesHtml = () => {
-    const rows = getLetterReferenceRows().filter(r => !letterRefHiddenFields.includes(r.key));
+    // a locked reference list prints exactly what the master says, whatever
+    // a draft may have hidden before the lock was applied
+    const rows = getLetterReferenceRows().filter(
+      r => canEditLetterField('customer_detail_fields')
+        ? !letterRefHiddenFields.includes(r.key) : true);
     const pairs = [];
     rows.forEach(r => { const v = letterRefFieldValue(r.key, r.value); if (v) pairs.push({ label: r.label, value: v }); });
     if (pairs.length === 0) return '';
@@ -4472,7 +4568,11 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     </div>`;
   };
   const buildReferencesText = () => {
-    const rows = getLetterReferenceRows().filter(r => !letterRefHiddenFields.includes(r.key));
+    // a locked reference list prints exactly what the master says, whatever
+    // a draft may have hidden before the lock was applied
+    const rows = getLetterReferenceRows().filter(
+      r => canEditLetterField('customer_detail_fields')
+        ? !letterRefHiddenFields.includes(r.key) : true);
     const parts = [];
     rows.forEach(r => { const v = letterRefFieldValue(r.key, r.value); if (v) parts.push(`${r.label}: ${v}`); });
     return parts.join(' | ');
@@ -4582,6 +4682,9 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
     holder.className = 'keep-light'; // letter = paper — stays white in dark mode
     holder.innerHTML = `<div style="max-width:780px;margin:0 auto;background:#fff;">${html}</div>`;
     document.body.appendChild(holder);
+    // html2canvas draws a list's ::marker tiny and above the line —
+    // write the bullets/numbers in as real text first
+    flattenListMarkers(holder);
     normalizeLetterHolderForCanvas(holder);
     const imgs = Array.from(holder.querySelectorAll('img'));
     await Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(res => { im.onload = res; im.onerror = res; })));
@@ -4762,7 +4865,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
   const buildLetterHtml = (pinFooter = false, omitFooter = false, omitHeader = false) => {
     const f = letterFields;
     // CSP-only service-cycle table sits right after the start paragraph.
-    const serviceCycleBlock = includeServiceCycle ? buildServiceCycleHtml() : '';
+    const serviceCycleBlock = (SHOW_SERVICE_CYCLE && includeServiceCycle) ? buildServiceCycleHtml() : '';
     const followupBlock = includeFollowups ? buildFollowupLetterHtml() : '';
     const quotationBlock = includeQuotations ? buildQuotationLetterHtml() : '';
     const letterrefBlock = includeLetterRefs ? buildLetterRefHtml() : '';
@@ -4775,7 +4878,7 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
         : `<div style="border-bottom:2px solid ${themeColor};padding:0 28px 10px;font-size:18px;font-weight:700;color:${themeColor};">${escapeLetterHtml(COMPANY_NAME)}</div>`);
 
     return `
-<div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:780px;margin:0 auto;${pinFooter ? 'min-height:1040px;display:flex;flex-direction:column;' : ''}">
+<div style="font-family:Arial,Helvetica,sans-serif;color:#111;background:#ffffff;max-width:780px;margin:0 auto;${pinFooter ? 'min-height:1040px;display:flex;flex-direction:column;' : ''}">
   ${headerBlock}
 
   <div style="padding:${LETTER_BODY_PADDING};">
@@ -4797,16 +4900,17 @@ To ensure uninterrupted service and optimal performance of your equipment, we re
 
     <div style="font-size:13px;line-height:1.7;">Dear Sir/Madam,</div>
 
-    <div style="margin-top:10px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(f.start_para)}</div>
+    <div style="margin-top:10px;font-size:13px;line-height:1.7;">${renderLetterParaHtml(f.start_para)}</div>
 
     ${serviceCycleBlock}
     ${followupBlock}
     ${quotationBlock}
     ${letterrefBlock}
 
-    <div style="margin-top:14px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(f.end_para)}</div>
+    <div style="margin-top:14px;font-size:13px;line-height:1.7;">${renderLetterParaHtml(f.end_para)}</div>
 
     <div style="margin-top:26px;font-size:13px;line-height:1.7;white-space:pre-wrap;">${escapeLetterHtml(LETTER_SIGNATURE)}</div>
+    ${f.signature_para ? `<div style="margin-top:14px;font-size:13px;line-height:1.7;">${renderLetterParaHtml(f.signature_para)}</div>` : ''}
   </div>
 
   ${(!omitFooter && footerImgDataUrl) ? `<img src="${footerImgDataUrl}" alt="${escapeLetterHtml(COMPANY_FULL)}" style="display:block;width:100%;max-width:780px;height:auto;margin:${pinFooter ? 'auto auto 0' : '14px auto 0'};" />` : ''}
@@ -4827,16 +4931,18 @@ Subject: ${f.subject}
 
 Dear Sir/Madam,
 
-${f.start_para}`;
-    if (includeServiceCycle) out += buildServiceCycleText();
+${renderLetterParaText(f.start_para)}`;
+    if (SHOW_SERVICE_CYCLE && includeServiceCycle) out += buildServiceCycleText();
     if (includeFollowups) out += buildFollowupLetterText();
     if (includeQuotations) out += buildQuotationLetterText();
     if (includeLetterRefs) out += buildLetterRefText();
-    out += `\n\n${f.end_para}\n\n${LETTER_SIGNATURE}`;
+    out += `\n\n${renderLetterParaText(f.end_para)}\n\n${LETTER_SIGNATURE}`;
+    if (f.signature_para) out += `\n\n${renderLetterParaText(f.signature_para)}`;
     return out;
   };
 
   const handlePrintLetter = async () => {
+    if (letterAttachmentsHydrating) { toast('Please wait — loading attachments…'); return; }
     const w = openPrintWindow();
     if (!w) return;
     const t = toast.loading('Preparing letter…');
@@ -4870,6 +4976,9 @@ ${f.start_para}`;
       holder.className = 'keep-light'; // letter = paper — stays white in dark mode
       holder.innerHTML = buildLetterHtml(false, true, true);
       document.body.appendChild(holder);
+      // html2canvas draws a list's ::marker tiny and above the line —
+      // write the bullets/numbers in as real text first
+      flattenListMarkers(holder);
       normalizeLetterHolderForCanvas(holder);
 
       const innerImgs = Array.from(holder.querySelectorAll('img'));
@@ -4917,6 +5026,9 @@ ${f.start_para}`;
       }
       const pagesHtml = pageDivs.join('');
 
+      // The attachments ride along in the SAME print job — each image centred
+      // on its own A4 sheet (shrunk to fit), each PDF page on its own sheet.
+      // Rendered pages are memoised, so re-printing is instant.
       let attHtml = '';
       try { attHtml = await buildAttachmentPrintHtmlAsync(letterAttachments); } catch (e) { attHtml = ''; }
 
@@ -4973,9 +5085,25 @@ ${f.start_para}`;
     });
     e.target.value = '';
   };
-
-  const removeLetterWizardAttachment = (i) =>
-    setLetterAttachments(prev => prev.filter((_, idx) => idx !== i));
+    /* Open one of the letter's attachments in its own tab. The wizard keeps
+       every attachment as base64, so it becomes a blob URL here rather than a
+       round trip to the server. */
+    const viewLetterWizardAttachment = (att) => {
+        if (!att?.content) { toast.error('This file has no content to open'); return; }
+        try {
+            const bin = atob(att.content);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+            const type = att.type
+                || (String(att.name || '').toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+            const url = URL.createObjectURL(new Blob([bytes], { type }));
+            openInNewTab(url);
+            // the tab owns the url now; release it once it has had time to load
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (e) {
+            toast.error('Could not open this attachment');
+        }
+    };
 
   const handleSendLetter = async () => {
     if (letterAttachmentsHydrating) { toast('Please wait — loading attachments…'); return; }
@@ -4986,10 +5114,12 @@ ${f.start_para}`;
     setLetterSending(true);
     const t = toast.loading('Sending letter...');
     try {
+      // The letter PDF carries every attachment merged in as pages, so the
+      // customer receives ONE file (see generateLetterPdfBase64).
       let letterPdfAttachment = null;
       if (letterChannels.includes('email')) {
         try {
-          const pdfB64 = await generateLetterPdfBase64();
+          const pdfB64 = await generateLetterPdfBase64(letterAttachments);
           if (pdfB64) {
             letterPdfAttachment = { name: safePdfName(letterFileName || letterFields.subject || letterFields.ref_no), content: pdfB64, type: 'application/pdf' };
           }
@@ -4997,9 +5127,12 @@ ${f.start_para}`;
           console.error('Letter PDF generation failed:', pdfErr);
         }
       }
+      // Original files ride along flagged skip_email — stored on the record for
+      // the history view/print, but not emailed separately (the letter PDF
+      // already carries them). If the PDF failed, they go out separately as before.
       const outgoingAttachments = [
         ...(letterPdfAttachment ? [letterPdfAttachment] : []),
-        ...letterAttachments
+        ...letterAttachments.map(a => (letterPdfAttachment ? { ...a, skip_email: true } : a))
       ];
 
       const payload = {
@@ -5043,7 +5176,10 @@ ${f.start_para}`;
         whatsapp_to: letterWhatsappTo,
         whatsapp_numbers: letterWhatsappList,
         email_body_html: buildLetterCoverHtml(),
-        attachments: outgoingAttachments.map(a => ({ name: a.name, content: a.content, type: a.type })),
+        attachments: outgoingAttachments.map(a => ({
+          name: a.name, content: a.content, type: a.type,
+          ...(a.skip_email ? { skip_email: true } : {})
+        })),
         sent_by_id: currentUser?.user_id || currentUser?.id,
         sent_by_name: currentUser?.name
       };
@@ -5113,7 +5249,10 @@ ${f.start_para}`;
       setLetterRefNo(r.ref_no);
       setLetterFy(r.financial_year || '');
       setLetterSeq(r.sequence_number || 1);
-      setLetterAttachments(r.attachments || []);
+      // The stored list keeps the rendered letter PDF as its first item.
+      // STRIP it on reopen: a fresh PDF is generated and prepended when
+      // the letter is sent, so keeping this one attaches the letter twice.
+      setLetterAttachments(stripEmbeddedLetterPdf(r.attachments || [], r.subject || ''));
       setLetterChannels(r.channels || []);
       setLetterEmailTo(r.email_to || '');
       setLetterWhatsappTo(r.whatsapp_to || '');
@@ -5245,22 +5384,6 @@ ${f.start_para}`;
     }
   };
 
-  // Lazy-load pdf.js (once) so PDF attachments can be rasterised to images for printing
-  const loadPdfJsForPrint = () => new Promise((resolve, reject) => {
-    if (window.pdfjsLib) return resolve(window.pdfjsLib);
-    const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-    s.onload = () => {
-      try {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      } catch (e) { /* ignore */ }
-      resolve(window.pdfjsLib);
-    };
-    s.onerror = () => reject(new Error('Could not load the PDF renderer'));
-    document.head.appendChild(s);
-  });
-
   const base64ToUint8Array = (b64) => {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
@@ -5268,63 +5391,10 @@ ${f.start_para}`;
     return bytes;
   };
 
-  // Render every page of a base64 PDF to PNG data URLs (so each page prints full-width, page-wise)
-  const renderPdfBase64ToImages = async (b64, scale = 2) => {
-    const pdfjsLib = await loadPdfJsForPrint();
-    const pdf = await pdfjsLib.getDocument({ data: base64ToUint8Array(b64) }).promise;
-    const images = [];
-    for (let p = 1; p <= pdf.numPages; p++) {
-      const page = await pdf.getPage(p);
-      const viewport = page.getViewport({ scale });
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-      images.push(canvas.toDataURL('image/png'));
-    }
-    return images;
-  };
-
-  // Build attachment print HTML:
-  //   image → full-width (name + image)
-  //   pdf   → every page rendered as a full-width image, page by page
-  //   video → file name only
-  const buildAttachmentPrintHtmlAsync = async (attachments) => {
-    const atts = attachments || [];
-    if (atts.length === 0) return '';
-    const page = (title, inner) =>
-      `<div style="page-break-before:always;max-width:780px;margin:0 auto;padding:18px 0;font-family:Arial,Helvetica,sans-serif;">
-               <div style="font-size:12px;font-weight:700;color:#111;margin-bottom:8px;">${escapeLetterHtml(title)}</div>
-               ${inner}
-             </div>`;
-    const imgStyle = 'max-width:100%;border:1px solid #ddd;border-radius:4px;display:block;margin:0 auto;';
-    let html = '';
-    for (const a of atts) {
-      const type = (a.type || '').toLowerCase();
-      const ext = (a.name || '').split('.').pop().toLowerCase();
-      const isImage = type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
-      const isPdf = type === 'application/pdf' || ext === 'pdf';
-      const isVideo = type.startsWith('video/') || ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext);
-
-      if (a.content && isImage) {
-        html += page(`Attachment: ${a.name}`, `<img src="data:${a.type || 'image/png'};base64,${a.content}" style="${imgStyle}" />`);
-      } else if (a.content && isPdf) {
-        try {
-          const imgs = await renderPdfBase64ToImages(a.content, 2);
-          imgs.forEach((src, i) => {
-            html += page(`Attachment: ${a.name} — page ${i + 1}/${imgs.length}`, `<img src="${src}" style="${imgStyle}" />`);
-          });
-        } catch (e) {
-          html += page(`Attachment: ${a.name}`, `<div style="font-size:11px;color:#888;">[Could not render PDF — name only]</div>`);
-        }
-      } else if (isVideo) {
-        html += page(`Attachment: ${a.name}`, `<div style="font-size:11px;color:#888;">[Video file — name only]</div>`);
-      } else {
-        html += page(`Attachment: ${a.name}`, `<div style="font-size:11px;color:#888;">[File attached]</div>`);
-      }
-    }
-    return html;
-  };
+  // Attachment print pages (shared util, memoised): image → ONE centred A4
+  // page shrunk to fit, pdf → each PDF page on its own A4 page, other →
+  // name-only page. Same pages in every letter print in the app.
+  const buildAttachmentPrintHtmlAsync = (attachments) => buildAttachmentPagesHtml(attachments);
 
   // Opens the print window synchronously (so pop-up blockers allow it) with a placeholder
   const openPrintWindow = () => {
@@ -5366,9 +5436,9 @@ ${f.start_para}`;
     // Strip the inline letterhead/footer bands from the stored HTML, then re-stamp them
     // per page (same as the Send Letter wizard) so the output looks identical.
     const body = viewLetterBareHtml.replace(/<img\b[^>]*?(?:max-width\s*:\s*780px|width\s*:\s*100%)[^>]*?>/gi, '');
-    // viewLetterAttachments is already cleaned in viewLetterRecord; double-guard here too.
-    const realAtts = stripEmbeddedLetterPdf(viewLetterAttachments, viewLetterSubject);
-    await printBandedHtml(w, body, realAtts, viewLetterSubject || 'Letter');
+    // viewLetterAttachments is already cleaned in viewLetterRecord; the letter's
+    // own attachments print in the same job — one A4 page per image / PDF page.
+    await printBandedHtml(w, body, viewLetterAttachments, viewLetterSubject || 'Letter');
   };
 
   const handleSaveLetterDraft = async () => {
@@ -10053,7 +10123,7 @@ ${f.start_para}`;
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto p-3 bg-gray-50 custom-scrollbar">
-                <div className="keep-light mx-auto max-w-[780px]" dangerouslySetInnerHTML={{ __html: viewLetterHtml }} />
+                <div className="keep-light letter-rich mx-auto max-w-[780px] bg-white shadow-sm" dangerouslySetInnerHTML={{ __html: viewLetterHtml }} />
                 {/* Recipients + attachments are on-screen metadata, never part of the letter
                   or its PDF — so they follow the app theme instead of sitting on the
                   letter's white `keep-light` paper. */}
@@ -10081,8 +10151,21 @@ ${f.start_para}`;
                 {viewLetterAttachments.length > 0 && (
                   <div className="mx-auto mt-[18px] max-w-[780px] border-t border-gray-200 pt-3">
                     <p className="mb-1.5 text-[12px] font-bold text-gray-900">Attachments ({viewLetterAttachments.length}):</p>
-                    <ul className="pl-[18px] text-[12px] leading-[1.7] text-gray-700">
-                      {viewLetterAttachments.map((a, i) => <li key={i}>{a.name}</li>)}
+                    <ul className="text-[12px] leading-[1.7] text-gray-700">
+                      {viewLetterAttachments.map((a, i) => (
+                        <li key={i} className="flex items-center gap-2 py-0.5">
+                          <span className="grid h-6 w-8 shrink-0 place-items-center rounded text-[8px] font-extrabold"
+                            style={{ background: 'rgba(47,49,146,0.10)', color: themeColor }}>
+                            {String(a.name || '').split('.').pop().toUpperCase().slice(0, 4)}
+                          </span>
+                          <button type="button" onClick={() => viewLetterWizardAttachment(a)}
+                            title={`Open ${a.name}`}
+                            className="min-w-0 flex-1 truncate text-left text-indigo-600 underline decoration-transparent underline-offset-2 hover:decoration-indigo-600">
+                            {a.name}
+                          </button>
+                          <EyeIcon className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                        </li>
+                      ))}
                     </ul>
                   </div>
                 )}
@@ -10283,7 +10366,7 @@ ${f.start_para}`;
                                   <div key={r.key}>
                                     <label className="text-[10px] text-gray-500 flex items-center justify-between">
                                       <span>{r.label}</span>
-                                      {r.removable && (
+                                      {r.removable && canEditLetterField('customer_detail_fields') && (
                                         <button type="button" title={`Remove "${r.label}" from this letter`}
                                           onClick={() => setLetterRefHiddenFields(prev => [...prev, r.key])}
                                           className="text-gray-400 hover:text-red-600">
@@ -10291,7 +10374,7 @@ ${f.start_para}`;
                                         </button>
                                       )}
                                     </label>
-                                    {r.editable ? (
+                                    {r.editable && canEditLetterField('customer_detail_fields') ? (
                                       <input
                                         value={letterRefFieldValue(r.key, r.value)}
                                         onChange={(e) => setLetterRefFieldValues(prev => ({ ...prev, [r.key]: e.target.value }))}
@@ -10303,7 +10386,8 @@ ${f.start_para}`;
                                   </div>
                                 ))}
                             </div>
-                            {getLetterReferenceRows().some(r => letterRefHiddenFields.includes(r.key)) && (
+                            {canEditLetterField('customer_detail_fields')
+                                                            && getLetterReferenceRows().some(r => letterRefHiddenFields.includes(r.key)) && (
                               <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                                 <span className="text-[10px] text-gray-500">Removed:</span>
                                 {getLetterReferenceRows()
@@ -10323,8 +10407,13 @@ ${f.start_para}`;
                         {/* Subject (= format type name, editable) */}
                         <div className="mb-3">
                           <label className="text-[10px] text-gray-500">Subject</label>
-                          <input value={letterFields.subject} onChange={(e) => setLetterFields(p => ({ ...p, subject: e.target.value }))}
-                            className="w-full border border-gray-200 rounded px-2 py-1 text-xs font-semibold" />
+                          {canEditLetterField('subject') ? (
+                                <input value={letterFields.subject}
+                                    onChange={(e) => setLetterFields(p => ({ ...p, subject: e.target.value }))}
+                                    className="w-full border border-gray-200 rounded px-2 py-1 text-xs font-semibold" />
+                            ) : (
+                                <div className="w-full py-1 text-xs font-semibold text-black">{letterFields.subject}</div>
+                            )}
                         </div>
 
                         <div className="text-xs mb-2">Dear Sir/Madam,</div>
@@ -10332,12 +10421,14 @@ ${f.start_para}`;
                         {/* Start para */}
                         <div className="mb-3">
                           <label className="text-[10px] text-gray-500">Start Paragraph</label>
-                          <textarea value={letterFields.start_para} onChange={(e) => setLetterFields(p => ({ ...p, start_para: e.target.value }))}
-                            className="w-full border border-gray-200 rounded px-2 py-2 text-xs leading-relaxed" style={{ minHeight: '120px' }} />
+                          <LetterParaEditor value={letterFields.start_para}
+                          readOnly={!canEditLetterField('start_para')}
+                          onChange={(v) => setLetterFields(p => ({ ...p, start_para: v }))}
+                          className="w-full border border-gray-200 rounded px-2 py-2 text-xs leading-relaxed" style={{ minHeight: '120px' }} />
                         </div>
 
                         {/* CSP-only: Service Cycle (KOEL preventive-maintenance) — shown right after the start para */}
-                        {(isCspLetter() || includeServiceCycle) && (
+                        {SHOW_SERVICE_CYCLE && (isCspLetter() || includeServiceCycle) && (
                           <div className="mb-3 border border-dashed border-gray-300 rounded-lg p-3 bg-gray-50 space-y-2">
                             <label className="flex items-center gap-1.5 text-xs font-medium text-black cursor-pointer">
                               <input
@@ -10504,12 +10595,14 @@ ${f.start_para}`;
                           </div>
                           {includeFollowups && (
                             <div className="pt-1">
-                              <label className="text-[10px] text-gray-500">Follow-up intro line (editable)</label>
+                              <label className="text-[10px] text-gray-500">Follow-up intro line{canEditLetterField('engagement_detail_fields') ? ' (editable)' : ''}</label>
                               <textarea
-                                value={letterFields.followup_intro}
-                                onChange={(e) => setLetterFields(p => ({ ...p, followup_intro: e.target.value }))}
+                                  value={letterFields.followup_intro}
+                                  readOnly={!canEditLetterField('engagement_detail_fields')}
+                                  onChange={(e) => canEditLetterField('engagement_detail_fields')
+                                      && setLetterFields(p => ({ ...p, followup_intro: e.target.value }))}
                                 className="w-full border border-gray-200 rounded px-2 py-1 text-[11px] leading-relaxed"
-                                rows="2"
+                                  rows="2"
                               />
                               {renderLetterEditTable({
                                 cols: LETTER_FOLLOWUP_COLS,
@@ -10525,12 +10618,14 @@ ${f.start_para}`;
                           )}
                           {includeQuotations && (
                             <div className="pt-1">
-                              <label className="text-[10px] text-gray-500">Quotation intro line (editable)</label>
+                              <label className="text-[10px] text-gray-500">Quotation intro line{canEditLetterField('engagement_detail_fields') ? ' (editable)' : ''}</label>
                               <textarea
-                                value={letterFields.quotation_intro}
-                                onChange={(e) => setLetterFields(p => ({ ...p, quotation_intro: e.target.value }))}
+                                  value={letterFields.quotation_intro}
+                                  readOnly={!canEditLetterField('engagement_detail_fields')}
+                                  onChange={(e) => canEditLetterField('engagement_detail_fields')
+                                      && setLetterFields(p => ({ ...p, quotation_intro: e.target.value }))}
                                 className="w-full border border-gray-200 rounded px-2 py-1 text-[11px] leading-relaxed"
-                                rows="2"
+                                  rows="2"
                               />
                               {renderLetterEditTable({
                                 cols: LETTER_QUOTATION_COLS,
@@ -10546,12 +10641,14 @@ ${f.start_para}`;
                           )}
                           {includeLetterRefs && (
                             <div className="pt-1">
-                              <label className="text-[10px] text-gray-500">Letter Ref intro line (editable)</label>
+                              <label className="text-[10px] text-gray-500">Letter Ref intro line{canEditLetterField('engagement_detail_fields') ? ' (editable)' : ''}</label>
                               <textarea
-                                value={letterFields.letterref_intro}
-                                onChange={(e) => setLetterFields(p => ({ ...p, letterref_intro: e.target.value }))}
+                                  value={letterFields.letterref_intro}
+                                  readOnly={!canEditLetterField('engagement_detail_fields')}
+                                  onChange={(e) => canEditLetterField('engagement_detail_fields')
+                                      && setLetterFields(p => ({ ...p, letterref_intro: e.target.value }))}
                                 className="w-full border border-gray-200 rounded px-2 py-1 text-[11px] leading-relaxed"
-                                rows="2"
+                                  rows="2"
                               />
                               {renderLetterEditTable({
                                 cols: LETTER_REF_COLS,
@@ -10570,12 +10667,27 @@ ${f.start_para}`;
                         {/* End para */}
                         <div className="mb-3">
                           <label className="text-[10px] text-gray-500">End Paragraph</label>
-                          <textarea value={letterFields.end_para} onChange={(e) => setLetterFields(p => ({ ...p, end_para: e.target.value }))}
-                            className="w-full border border-gray-200 rounded px-2 py-2 text-xs leading-relaxed" style={{ minHeight: '90px' }} />
+                          <LetterParaEditor value={letterFields.end_para}
+                          readOnly={!canEditLetterField('end_para')}
+                          onChange={(v) => setLetterFields(p => ({ ...p, end_para: v }))}
+                          className="w-full border border-gray-200 rounded px-2 py-2 text-xs leading-relaxed" style={{ minHeight: '90px' }} />
                         </div>
 
                         {/* Common signature (not editable) */}
                         <div className="text-xs whitespace-pre-wrap text-gray-700 border-t border-gray-100 pt-2">{LETTER_SIGNATURE}</div>
+                        {/* The paragraph the Letter Master prints BELOW the signature. */}
+                        {(letterFields.signature_para || canEditLetterField('signature_para')) && (
+                            <div className="mt-2">
+                                <label className="block text-[11px] font-semibold text-black mb-1">
+                                    After signature
+                                </label>
+                                <LetterParaEditor value={letterFields.signature_para}
+                                    readOnly={!canEditLetterField('signature_para')}
+                                    onChange={(v) => setLetterFields(p => ({ ...p, signature_para: v }))}
+                                    className="w-full border border-gray-200 rounded px-2 py-2 text-xs leading-relaxed"
+                                    style={{ minHeight: '70px' }} />
+                            </div>
+                        )}
                       </div>
 
                       {/* Footer image (pic 2) */}
@@ -10585,7 +10697,12 @@ ${f.start_para}`;
                     {/* Attachments */}
                     <div className="border border-gray-200 rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2 max-sm:flex-wrap max-sm:gap-2">
-                        <p className="text-[11px] font-bold text-black uppercase">Attachments ({letterAttachments.length})</p>
+                        <p className="text-[11px] font-bold text-black uppercase">
+                                                    Attachments ({letterAttachments.length})
+                                                    <span className="ml-1.5 font-normal normal-case text-[10px] text-gray-400">
+                                                        sent as separate files — Print above covers the letter only
+                                                    </span>
+                                                </p>
                         <div className="flex items-center gap-2">
                           <input type="file" multiple accept=".mp4,.jpg,.jpeg,.png,.pdf,.doc,.docx,.xlsx,.xls,.csv"
                             onChange={handleLetterAddAttachment} className="hidden" id="letter-extra-attach" />
@@ -10594,10 +10711,6 @@ ${f.start_para}`;
                             style={{ backgroundColor: themeColor }}>
                             <PlusIcon className="h-3 w-3" /> Add file
                           </label>
-                          <button onClick={handlePrintLetter}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] border border-gray-300 rounded-md hover:bg-gray-50 text-black">
-                            <DocumentTextIcon className="h-3 w-3" /> Print
-                          </button>
                         </div>
                       </div>
                       {letterAttachments.length === 0 ? (
@@ -10611,8 +10724,10 @@ ${f.start_para}`;
                                 <span className="text-[11px] text-black truncate">{a.name}</span>
                                 {a.size && <span className="text-[10px] text-gray-400 shrink-0">({(a.size / 1024).toFixed(0)} KB)</span>}
                               </div>
-                              <button onClick={() => removeLetterWizardAttachment(i)} className="text-red-500 hover:text-red-700 shrink-0 ml-1">
-                                <XMarkIcon className="h-3.5 w-3.5" />
+                              <button onClick={() => viewLetterWizardAttachment(a)}
+                                  title={`Open ${a.name}`}
+                                  className="shrink-0 ml-1 text-gray-400 hover:text-indigo-600">
+                                  <EyeIcon className="h-3.5 w-3.5" />
                               </button>
                             </div>
                           ))}
@@ -10637,9 +10752,49 @@ ${f.start_para}`;
                           </button>
                         </div>
                       </div>
-                      <div className="p-2 max-h-[65vh] overflow-y-auto bg-gray-50">
-                        <div className="keep-light" dangerouslySetInnerHTML={{ __html: buildLetterHtml() }} />
+                      <div className="p-0 max-h-[65vh] overflow-y-auto bg-white">
+                        <div className="keep-light letter-rich" dangerouslySetInnerHTML={{ __html: buildLetterHtml() }} />
                       </div>
+                    </div>
+
+                    {/* Attachments — the letter prints on its own (Print above covers the
+                        letter only), so the files that travel WITH it get their own box here,
+                        each openable before the letter goes out. */}
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        <div className="px-3 py-1.5 bg-gray-50 text-xs font-bold text-black flex items-center justify-between max-sm:flex-wrap max-sm:gap-1.5">
+                            <span>Attachments ({letterAttachments.length})</span>
+                            <span className="text-[10px] font-normal text-gray-500">
+                                sent with the letter as separate files
+                            </span>
+                        </div>
+                        {letterAttachments.length === 0 ? (
+                            <p className="px-3 py-3 text-[11px] text-gray-400">
+                                No attachments — only the letter PDF will be sent.
+                            </p>
+                        ) : (
+                            <div className="divide-y divide-gray-100 max-h-52 overflow-y-auto">
+                                {letterAttachments.map((a, i) => (
+                                    <div key={i} className="flex items-center gap-2 px-3 py-2">
+                                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded text-[8.5px] font-extrabold"
+                                            style={{ background: 'rgba(47,49,146,0.10)', color: themeColor }}>
+                                            {String(a.name || '').split('.').pop().toUpperCase().slice(0, 4)}
+                                        </span>
+                                        <button type="button" onClick={() => viewLetterWizardAttachment(a)}
+                                            title={`Open ${a.name}`}
+                                            className="min-w-0 flex-1 truncate text-left text-[11.5px] text-indigo-600 underline decoration-transparent underline-offset-2 hover:decoration-indigo-600">
+                                            {a.name}
+                                        </button>
+                                        {a.size ? (
+                                            <span className="shrink-0 text-[10px] text-gray-400">{(a.size / 1024).toFixed(0)} KB</span>
+                                        ) : null}
+                                        <button type="button" onClick={() => viewLetterWizardAttachment(a)} title="View"
+                                            className="shrink-0 rounded p-1 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600">
+                                            <EyeIcon className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
 
                     <div className="border border-gray-200 rounded-lg p-3 space-y-3">

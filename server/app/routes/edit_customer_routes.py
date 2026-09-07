@@ -18,7 +18,7 @@ def get_db():
         db.close()
 
 @router.post("/customers/{customer_id}/save-edit", response_model=edit_customer_schema.CustomerEditHistoryResponse)
-async def save_customer_edit(
+def save_customer_edit(
     customer_id: int,
     edit_request: edit_customer_schema.CustomerEditRequest,
     db: Session = Depends(get_db)
@@ -67,7 +67,7 @@ async def save_customer_edit(
     return history_entry
 
 @router.get("/customers/{customer_id}/history", response_model=edit_customer_schema.CustomerEditHistoryList)
-async def get_customer_edit_history(
+def get_customer_edit_history(
     customer_id: int,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -94,7 +94,7 @@ async def get_customer_edit_history(
     return result
 
 @router.get("/customers/{customer_id}/with-edit-info")
-async def get_customer_with_edit_info(
+def get_customer_with_edit_info(
     customer_id: int,
     db: Session = Depends(get_db)
 ):
@@ -114,7 +114,7 @@ async def get_customer_with_edit_info(
     return result
 
 @router.get("/edited-customers", response_model=List[dict])
-async def get_all_edited_customers(
+def get_all_edited_customers(
     skip: int = Query(0, ge=0),
     limit: int = Query(100000, ge=1, le=100000),
     db: Session = Depends(get_db)
@@ -127,7 +127,7 @@ async def get_all_edited_customers(
     return result
 
 @router.delete("/customers/{customer_id}/history/{history_id}")
-async def delete_edit_history_entry(
+def delete_edit_history_entry(
     customer_id: int,
     history_id: int,
     db: Session = Depends(get_db)
@@ -153,7 +153,7 @@ async def delete_edit_history_entry(
     return {"message": "Edit history entry deleted successfully"}
 
 @router.get("/customers/{customer_id}/compare")
-async def compare_original_and_edited(
+def compare_original_and_edited(
     customer_id: int,
     db: Session = Depends(get_db)
 ):
@@ -200,7 +200,7 @@ async def compare_original_and_edited(
     }
 
 @router.patch("/history/{history_id}/done")
-async def update_edit_history_done(
+def update_edit_history_done(
     history_id: int,
     is_done: bool = Body(True, embed=True),
     db: Session = Depends(get_db)
@@ -217,7 +217,7 @@ async def update_edit_history_done(
 
 
 @router.patch("/history/{history_id}/soft-delete")
-async def soft_delete_edit_history_row(
+def soft_delete_edit_history_row(
     history_id: int,
     db: Session = Depends(get_db)
 ):

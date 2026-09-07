@@ -58,13 +58,16 @@ const SortIcon = ({ active, dir }) => (
 
 /* A sortable <th>. Pass the same `sort` / `onSort` from useSort to every header
    in one table. `align` positions the label + arrows within the cell. */
-export const SortTh = ({ label, sortKey, sort, onSort, className = '', style, align = 'center', title, rowSpan, colSpan, wrap = false }) => {
+/* `label` may be a node (e.g. a two-line header with a <br>); pass `labelText`
+   with the plain wording so the tooltip stays readable. `thRef` forwards a ref
+   to the <th> itself, for callers that measure a column's rendered width. */
+export const SortTh = ({ label, labelText, sortKey, sort, onSort, className = '', style, align = 'center', title, rowSpan, colSpan, wrap = false, thRef }) => {
     const active = sort?.key === sortKey;
     const dirLabel = !active ? 'A–Z' : sort.dir === 'asc' ? 'Z–A' : 'natural order';
     return (
-        <th className={className} style={style} title={title} rowSpan={rowSpan} colSpan={colSpan}>
+        <th ref={thRef} className={className} style={style} title={title} rowSpan={rowSpan} colSpan={colSpan}>
             <button type="button" onClick={() => onSort(sortKey)}
-                title={`Sort by ${label} — ${dirLabel}`}
+                title={`Sort by ${labelText ?? label} — ${dirLabel}`}
                 className={`inline-flex w-full items-center gap-1 select-none transition hover:opacity-70 ${align === 'left' ? 'justify-start' : 'justify-center'}`}
                 // Tailwind's preflight puts `text-transform: none` on buttons, which
                 // silently cancelled the header row's `uppercase` — inherit it back.

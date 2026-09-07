@@ -230,10 +230,15 @@ def backfill_primary_branches(db):
     only inserts rows for users that don't already have one."""
     try:
         users = db.query(User).all()
+        # One query for every user_id that already has an access row, instead
+        # of a per-user SELECT. That loop was 1 + len(users) round trips on
+        # every single startup (~52 trips / ~3 s here) to do nothing at all.
+        have_access = {
+            uid for (uid,) in db.query(UserBranchAccess.user_id).distinct()
+        }
         inserted = 0
         for u in users:
-            exists = db.query(UserBranchAccess).filter_by(user_id=u.user_id).first()
-            if not exists:
+            if u.user_id not in have_access:
                 db.add(UserBranchAccess(
                     user_id=u.user_id,
                     branch=u.branch,
@@ -354,6 +359,11 @@ app.add_middleware(
         "https://kalapms.com",
         "http://kalacare.kalapms.com",
         "https://kalacare.kalapms.com",
+        # Both loopback spellings, so the app works whether it is opened at
+        # localhost:8383 or 127.0.0.1:8383 (the API base uses 127.0.0.1 to
+        # skip the slow IPv6-first connect on Windows).
+        "http://localhost:8383",
+        "http://127.0.0.1:8383",
         ALLOWED_ORIGIN
     ],
     allow_credentials=True,

@@ -11,7 +11,8 @@
 import {
   S, COMMITMENTS, SUPPORT, COMPLY, SR_TYPES, PART_CATS, TRAIN_FOR, MON,
   pdate, isoOf, addD, periodSpan, achieve, targetFor, iN, iL, i1, trim2,
-  fmtVal, plain, plural, tenureOf,
+  plain, plural, tenureOf, srOn, srInMonth, workDaysOf, convOn, convInMonth,
+  cdiOn, cdiInMonth, cdiPct, efOn, efInMonth, pctOf, lbOn, lbInMonth, hhmm, ATT,
 } from './sePerformanceModel';
 
 const rng = (seed) => { let s = (seed >>> 0) || 1; return () => { s = (s * 1103515245 + 12345) >>> 0; return (s >>> 8) / 0xFFFFFF; }; };
@@ -22,7 +23,6 @@ const seedOf = (uid) => {
   return h || 1;
 };
 const monthDays = (y, m) => new Date(y, m + 1, 0).getDate();
-const sundaysIn = (y, m) => { let n = 0; const d = monthDays(y, m); for (let k = 1; k <= d; k++) if (new Date(y, m, k).getDay() === 0) n++; return n; };
 
 /** Spread a total across weighted slots so the parts add back to the whole. */
 export function spreadInt(total, w) {
@@ -34,17 +34,6 @@ export function spreadInt(total, w) {
   for (let i = 0; i < rem; i++) out[order[i % order.length][1]]++;
   return out;
 }
-const spreadNum = (total, w) => { const sum = w.reduce((a, b) => a + b, 0) || 1; return w.map((x) => (total * x) / sum); };
-
-/** A rate varies day to day around the engineer's own figure. The deviations
-    sum to zero and stay inside the headroom, so nothing needs clamping and the
-    mean stays exactly the period figure. */
-function wobble(base, n, r, cap) {
-  const head = Math.min(base, cap - base) * 0.55;
-  const d = Array.from({ length: n }, () => (r() - 0.5) * 2 * head);
-  const mean = d.reduce((a, b) => a + b, 0) / n;
-  return d.map((x) => base + x - mean);
-}
 
 /** An engineer's job mix is a PROPERTY OF THE ENGINEER, not noise: the same
     shares apply to every bucket, so the mix reads as a profile down the row. */
@@ -53,14 +42,6 @@ function mixOf(seed, n) {
   const s = w.reduce((a, b) => a + b, 0);
   return w.map((x) => x / s);
 }
-/** Deviations that come to zero under the mix's own weights. */
-function devFor(mix, base, r, cap) {
-  const head = Math.min(base, cap - base) * 0.5;
-  const d = mix.map(() => (r() - 0.5) * 2 * head);
-  const m = d.reduce((a, x, i) => a + x * mix[i], 0);
-  return d.map((x) => x - m);
-}
-
 /** Every bucket carries its own bifurcations, so a metric opens at any
     granularity without regenerating anything. */
 function bifurcate(se, B) {
@@ -68,64 +49,120 @@ function bifurcate(se, B) {
   const srMix = mixOf(sd * 13 + 1, SR_TYPES.length);
   const partMix = mixOf(sd * 13 + 2, PART_CATS.length);
   const labMix = mixOf(sd * 13 + 3, SR_TYPES.length);
-  const closeDev = devFor(srMix, se.v.closure, rng(sd * 13 + 4), 100);
   B.forEach((b) => {
-    b.srBy = {}; b.labourBy = {}; b.spareBy = {}; b.closeBy = {};
+    b.srBy = {}; b.labourBy = {}; b.spareBy = {};
     const srSplit = spreadInt(b.sr, srMix);
     SR_TYPES.forEach((t, i) => {
       b.srBy[t] = srSplit[i];
       b.labourBy[t] = b.labour * labMix[i];
-      b.closeBy[t] = Math.max(0, Math.min(100, b.closure + closeDev[i]));
     });
     PART_CATS.forEach((c, i) => { b.spareBy[c] = b.spare * partMix[i]; });
   });
-  // CDI feedback: struck ONCE over the whole period and then spread. Struck per
-  // bucket it degenerates — a day carries one feedback, and one feedback always
-  // lands in whichever share is largest, so a 7.4 engineer shows promotors only.
-  const nAll = Math.max(3, Math.round(B.reduce((a, b) => a + b.sr, 0) / 4));
-  const rate = B.reduce((a, b) => a + b.cdi * b.days, 0) / (B.reduce((a, b) => a + b.days, 0) || 1);
-  const pSh = Math.max(0.06, Math.min(0.94, (rate - 4.5) / 5.5));
-  const dSh = (1 - pSh) * 0.45;
-  const [Pall, PaAll, Dall] = spreadInt(nAll, [pSh, 1 - pSh - dSh, dSh]);
-  const w = B.map((b) => b.sr + 0.35);                 // feedback follows the load
-  const pB = spreadInt(Pall, w); const paB = spreadInt(PaAll, w); const dB = spreadInt(Dall, w);
-  B.forEach((b, i) => { b.cdiP = pB[i]; b.cdiPa = paB[i]; b.cdiD = dB[i]; b.cdiN = pB[i] + paB[i] + dB[i]; });
   return B;
 }
+
+/** ATTENDANCE OFF HR'S DAY-WISE FILE, one date at a time: [expected, worked].
+
+    expected is 1 on a day he was meant to work and NULL on a day nobody
+    expected him to - a weekly off, a c-off, a holiday, or a day the file says
+    nothing about. That distinction is the whole point: a weekly off scored as a
+    zero drags the attendance line to the floor every Sunday and on whatever
+    weekday his rota gives him, and reads as an absence he never took.
+
+    worked is a day for Present or Outdoor Duty, half a day for a Half Day, and
+    nothing for Leave or Absent - which are the only two that cost him
+    anything.
+
+    null for a month with no day-wise file; the caller falls back to HR's month
+    total spread over the master's man-days, which is all such a month has. */
+const attOn = (se, iso) => {
+  const s = se.at && se.at[iso.slice(0, 7)];
+  if (!s) return null;                          // no day-wise file for the month
+  const a = ATT[s[+iso.slice(8, 10) - 1]];
+  // [0, 0] and NOT null for a weekly off, a c-off or a holiday: the file DOES
+  // cover the day, it just says nobody expected him on it. Returning null there
+  // handed the day to the fallback below, which spread the month total over the
+  // master's man-days and printed 85% on a c-off - a figure for a day the file
+  // had already answered.
+  if (!a || a.worth === null) return [0, 0];
+  return [1, a.worth];
+};
 
 /* ---- day ---------------------------------------------------------------- */
 export function dayBuckets(se) {
   const days = [];
   for (let d = S.from; d <= S.to && days.length < 400; d = addD(d, 1)) days.push(d);
-  const n = days.length || 1;
-  const r = rng(seedOf(se.key) * 31 + 17);
-  // Sunday carries a token load, not none: emergency call-outs happen
-  const w = days.map((d) => (pdate(d).getDay() === 0 ? 0.07 : 0.55 + r() * 1.0));
-  const sr = spreadInt(se.v.sr, w);
-  const spare = spreadNum(se.v.spare, w); const labour = spreadNum(se.v.labour, w);
-  const leads = spreadInt(se.v.amcLead, w); const batt = spreadInt(se.v.battery, w);
+  // SR CLOSED is the day's own count out of the MaxTTR file — never a share of
+  // a period total spread over the days, which is what every other row here
+  // still is. A Sunday with a call-out shows the call-out.
+  const sr = days.map((d) => srOn(se, d));
+  // the MaxTTR close count rides along: nothing on the columns divides by it,
+  // but the productivity chart above them does
+  const maxSr = days.map((d) => (se.maxDay ? (se.maxDay[d] || 0) : 0));
+  const alloc = days.map((d) => (se.allocDay ? (se.allocDay[d] || [0, 0]) : [0, 0]));
+  // the day's own conversion amounts, out of the LMS file — not a period total
+  // spread over the days, which is what these two used to be
+  const spare = days.map((d) => convOn(se, d)[0]);
+  const labour = days.map((d) => convOn(se, d)[1]);
+  // the day's own AMC leads and batteries, out of their two files
+  const leads = days.map((d) => lbOn(se, d)[0]);
+  const batt = days.map((d) => lbOn(se, d)[1]);
 
-  // EVERY day the branch works is marked P or A. Only a Sunday carries a dash,
-  // because only a Sunday is not a working day.
-  const work = days.map((d) => (pdate(d).getDay() === 0 ? 0 : 1));
-  const wantWork = work.reduce((a, b) => a + b, 0);
-  const pres = work.slice();
-  const order = [...days.keys()].sort((a, b) => ((a * 2246822519) % 101) - ((b * 2246822519) % 101));
-  let absent = wantWork - Math.max(0, Math.min(wantWork, Math.round((wantWork * se.v.attend) / 100)));
-  for (const i of order) { if (absent <= 0) break; if (pres[i]) { pres[i] = 0; absent--; } }
+  /* WORKING DAYS and DAYS PRESENT are both MONTHLY figures — the AOP master
+     gives a count for the month and never says which days, and HR's file has
+     one row per month and no day detail at all. Neither can be turned into a
+     truthful per-day mark, so both are spread evenly across the month's
+     non-Sundays: the day and week columns then ADD BACK to the month's real
+     total, which is this file's whole contract, and no single day is claimed
+     to be the one he was absent on.
+     A Sunday carries none of either — it is not a working day. */
+  // WHOLE DAYS, and they add up to the month's own figure. The master gives a
+  // COUNT and never says which days, so the count is laid on the month's
+  // non-Sundays oldest first — which on this data lands exactly right, because
+  // the reason August is 20 rather than 26 is that the files stop on the 24th,
+  // and it is the days after it that are not working days.
+  //
+  // Fractions were tried here and are worse than wrong, they are unreadable: a
+  // day worth 0.77 of a man-day turned 5 SRs into a productivity of 6.46.
+  const wdTotal = Math.round(se.workDays || 0);
+  const workIdx = new Set(days
+    .map((d, i) => (pdate(d).getDay() === 0 ? -1 : i)).filter((i) => i >= 0)
+    .slice(0, wdTotal));
+  const work = days.map((_d, i) => (workIdx.has(i) ? 1 : 0));
+  // HR's attendance is a MONTH's total with no day detail, so it is spread
+  // evenly across those working days: the columns add back to it, and no single
+  // day is claimed to be the one he missed.
+  const prShare = (se.present == null || !wdTotal) ? null : se.present / wdTotal;
+  const pres = days.map((_d, i) => (workIdx.has(i) && prShare != null ? prShare : 0));
+  // the fraction of a MONTH each column is worth, so a quarter or a year can
+  // report the average month instead of a total nobody can hold in their head
+  const mfShare = 1 / (days.length || 1);
+  const hrOk = se.present != null;
 
-  const closure = wobble(se.v.closure, n, r, 100);
-  const first = wobble(se.v.first, n, r, 100);
-  const cdi = wobble(se.v.cdi, n, r, 10);
+  const att = days.map((d) => attOn(se, d));
+  // the day's own EFSR counts and CDI feedback
+  const ef = days.map((d) => efOn(se, d));
+  const cdi = days.map((d) => cdiOn(se, d));
   return bifurcate(se, days.map((d, i) => ({
     key: d,
     label: pdate(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
     sub: pdate(d).toLocaleDateString('en-GB', { weekday: 'short' }),
     off: pdate(d).getDay() === 0,
-    sr: sr[i], spare: spare[i], labour: labour[i], leads: leads[i], batt: batt[i],
+    sr: sr[i], maxSr: maxSr[i], alloc: alloc[i][0], allocOk: alloc[i][1],
+    spare: spare[i], labour: labour[i], leads: leads[i], batt: batt[i],
     work: work[i], pres: pres[i],
-    attend: work[i] ? pres[i] * 100 : se.v.attend,
-    closure: closure[i], first: first[i], cdi: cdi[i], days: 1,
+    mf: mfShare, hrMf: hrOk ? mfShare : 0,
+    /* the day's OWN attendance where HR sent it day by day, and the month
+       total spread over the man-days where it did not */
+    attD: att[i] ? att[i][0] : 0, attP: att[i] ? att[i][1] : 0,
+    attend: att[i] ? (att[i][0] ? att[i][1] * 100 : null)
+      : (work[i] && hrOk ? (pres[i] / work[i]) * 100 : null),
+    days: 1,
+    fsOn: ef[i][0], fsD: ef[i][1], tcOk: ef[i][2], tcN: ef[i][3], fsMin: ef[i][4],
+    first: pctOf(ef[i][0], ef[i][1]), sfTask: pctOf(alloc[i][1], alloc[i][0]),
+    cdiP: cdi[i][0], cdiD: cdi[i][1], cdiPa: cdi[i][2],
+    cdiN: cdi[i][0] + cdi[i][1] + cdi[i][2],
+    cdi: cdiPct(cdi[i]),
   })));
 }
 
@@ -138,16 +175,28 @@ export function weekBuckets(se) {
     let b = out[out.length - 1];
     if (!b || b.ws !== ws) {
       b = { ws, key: ws, label: `W${out.length + 1}`, sub: '', sr: 0, spare: 0, labour: 0,
-        leads: 0, batt: 0, work: 0, pres: 0, closure: 0, first: 0, cdi: 0, days: 0 };
+        leads: 0, batt: 0, work: 0, pres: 0, mf: 0, hrMf: 0, days: 0, maxSr: 0,
+        alloc: 0, allocOk: 0, attD: 0, attP: 0,
+        fsOn: 0, fsD: 0, tcOk: 0, tcN: 0, fsMin: 0,
+        cdiP: 0, cdiD: 0, cdiPa: 0, cdiN: 0 };
       out.push(b);
     }
-    ['sr', 'spare', 'labour', 'leads', 'batt', 'work', 'pres'].forEach((k) => { b[k] += d[k]; });
-    ['closure', 'first', 'cdi'].forEach((k) => { b[k] += d[k]; });
+    ['sr', 'maxSr', 'alloc', 'allocOk', 'spare', 'labour', 'leads', 'batt', 'work', 'pres', 'mf', 'hrMf',
+      'attD', 'attP', 'fsOn', 'fsD', 'tcOk', 'tcN', 'fsMin',
+      'cdiP', 'cdiD', 'cdiPa', 'cdiN'].forEach((k) => { b[k] += d[k]; });
     b.days++; b.end = d.key;
   });
   out.forEach((b) => {
-    ['closure', 'first', 'cdi'].forEach((k) => { b[k] /= b.days; });
-    b.attend = b.work ? (b.pres / b.work) * 100 : 0;
+    b.first = pctOf(b.fsOn, b.fsD);
+    b.sfTask = pctOf(b.allocOk, b.alloc);
+    // the percentage is struck from the week's OWN counts, never averaged from
+    // the days' percentages — a day with one detractor is -100% and would drag
+    // a week of promotors below zero
+    b.cdi = cdiPct([b.cdiP, b.cdiD, b.cdiPa]);
+    // the week's OWN days out of HR's day-wise file, and only where it has
+    // none does the month total spread over the man-days answer instead
+    b.attend = b.attD ? (b.attP / b.attD) * 100
+      : ((b.work && b.hrMf) ? (b.pres / b.work) * 100 : null);
     // the first and last week of a period are CLIPPED to it
     const st = b.ws < S.from ? S.from : b.ws;
     b.sub = `${pdate(st).getDate()}–${pdate(b.end).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}`;
@@ -157,28 +206,53 @@ export function weekBuckets(se) {
 
 /* ---- months, and the quarters and years folded from them ---------------- */
 function rawMonths(se, N) {
-  const end = pdate(S.to); const out = []; const r = rng(seedOf(se.key) * 7919 + 3);
+  const end = pdate(S.to); const out = [];
   for (let i = N - 1; i >= 0; i--) {
     const d = new Date(end.getFullYear(), end.getMonth() - i, 1);
     const dim = monthDays(d.getFullYear(), d.getMonth());
-    const f = i === 0 ? 1 : 0.62 + r() * 0.72;
     const m = {
       key: isoOf(d), label: MON[d.getMonth()], sub: String(d.getFullYear()).slice(2),
       cur: i === 0, days: dim,
       sr: 0,                                   // set from the month's own P days
-      spare: se.base.spare * f, labour: se.base.labour * f,
-      leads: Math.round(se.base.amcLead * f), batt: Math.round(se.base.battery * f),
-      attend: Math.min(100, se.base.attend * (i === 0 ? 1 : 0.9 + r() * 0.2)),
-      closure: Math.min(100, se.base.closure * (i === 0 ? 1 : 0.88 + r() * 0.24)),
-      first: Math.min(100, se.base.first * (i === 0 ? 1 : 0.88 + r() * 0.24)),
-      cdi: Math.min(10, se.base.cdi * (i === 0 ? 1 : 0.9 + r() * 0.2)),
+      leads: 0, batt: 0,
     };
-    m.work = dim - sundaysIn(d.getFullYear(), d.getMonth());
-    m.pres = Math.round((m.work * m.attend) / 100);
-    m.attend = m.work ? (m.pres / m.work) * 100 : 0;
-    // productivity moves month to month, but stays inside the band
-    const rate = Math.max(1.0, Math.min(1.5, se.base.prodRate * (0.92 + r() * 0.16)));
-    m.sr = Math.max(1, Math.round(rate * m.pres));
+    const mk = m.key.slice(0, 7);
+    // the month's own counted SRs, the master's own man-days and HR's own days
+    // present; the quarters and financial years fold from these, so every
+    // granularity reads the same three sources
+    m.sr = srInMonth(se, mk);
+    m.maxSr = se.maxMonth ? (se.maxMonth[mk] || 0) : 0;
+    const am = se.allocMonth ? (se.allocMonth[mk] || [0, 0]) : [0, 0];
+    m.alloc = am[0]; m.allocOk = am[1];
+    const cv = convInMonth(se, mk);
+    m.spare = cv[0]; m.labour = cv[1];
+    const cd = cdiInMonth(se, mk);
+    m.cdiP = cd[0]; m.cdiD = cd[1]; m.cdiPa = cd[2];
+    m.cdiN = cd[0] + cd[1] + cd[2];
+    m.cdi = cdiPct(cd);
+    const lb = lbInMonth(se, mk);
+    m.leads = lb[0]; m.batt = lb[1];
+    const ef = efInMonth(se, mk);
+    m.fsOn = ef[0]; m.fsD = ef[1]; m.tcOk = ef[2]; m.tcN = ef[3]; m.fsMin = ef[4];
+    m.first = pctOf(ef[0], ef[1]);
+    m.sfTask = pctOf(m.allocOk, m.alloc);   // closed ON the day allocated
+    // the month's attendance, day by day, out of HR's own file
+    const acodes = se.at && se.at[mk];
+    let aD = 0; let aP = 0;
+    if (acodes) {
+      for (const ch of acodes) {
+        const a = ATT[ch];
+        if (a && a.worth !== null) { aD += 1; aP += a.worth; }
+      }
+    }
+    m.attD = aD; m.attP = aP;
+    m.work = workDaysOf(se.region, d.getFullYear(), d.getMonth());
+    const hr = se.hr && (mk in se.hr) ? se.hr[mk] : null;
+    m.pres = hr == null ? 0 : hr;
+    m.mf = 1;
+    m.hrMf = hr == null ? 0 : 1;
+    m.attend = aD ? (aP / aD) * 100
+      : ((hr == null || !m.work) ? null : (hr / m.work) * 100);
     out.push(m);
   }
   return out;
@@ -205,15 +279,23 @@ function foldMonths(se, months, keyOf, labelOf, subOf) {
     let g = byKey.get(k);
     if (!g) {
       g = { key: k, label: labelOf(d), sub: subOf(d), days: 0, sr: 0, spare: 0, labour: 0,
-        leads: 0, batt: 0, work: 0, pres: 0, closure: 0, first: 0, cdi: 0 };
+        leads: 0, batt: 0, work: 0, pres: 0, mf: 0, hrMf: 0, maxSr: 0, alloc: 0, allocOk: 0,
+        attD: 0, attP: 0,
+        fsOn: 0, fsD: 0, tcOk: 0, tcN: 0, fsMin: 0,
+        cdiP: 0, cdiD: 0, cdiPa: 0, cdiN: 0 };
       byKey.set(k, g); out.push(g);
     }
-    ['sr', 'spare', 'labour', 'leads', 'batt', 'work', 'pres', 'days'].forEach((f) => { g[f] += m[f]; });
-    ['closure', 'first', 'cdi'].forEach((f) => { g[f] += m[f] * m.days; });
+    ['sr', 'maxSr', 'alloc', 'allocOk', 'spare', 'labour', 'leads', 'batt', 'work', 'pres', 'mf', 'hrMf',
+      'days', 'attD', 'attP', 'fsOn', 'fsD', 'tcOk', 'tcN', 'fsMin',
+      'cdiP', 'cdiD', 'cdiPa', 'cdiN'].forEach((f) => { g[f] += m[f]; });
   });
   out.forEach((g) => {
-    ['closure', 'first', 'cdi'].forEach((f) => { g[f] = g.days ? g[f] / g.days : 0; });
-    g.attend = g.work ? (g.pres / g.work) * 100 : 0;
+    g.first = pctOf(g.fsOn, g.fsD);
+    g.sfTask = pctOf(g.allocOk, g.alloc);
+    g.cdi = cdiPct([g.cdiP, g.cdiD, g.cdiPa]);
+    // over the months HR actually sent, never over all of them
+    g.attend = g.attD ? (g.attP / g.attD) * 100
+      : ((g.hrMf && g.work) ? (g.pres / (g.work * (g.hrMf / g.mf))) * 100 : null);
   });
   return bifurcate(se, out);
 }
@@ -227,8 +309,10 @@ export function quarterBuckets(se) {
   const fy = FYof(pdate(S.to));
   const out = QUARTER_SPANS.map((span, q) => ({
     key: `${fy}Q${q}`, label: `Q${q + 1}`, sub: span, empty: true,
-    days: 0, sr: 0, spare: 0, labour: 0, leads: 0, batt: 0,
-    work: 0, pres: 0, closure: 0, first: 0, cdi: 0, attend: 0,
+    days: 0, sr: 0, maxSr: 0, alloc: 0, allocOk: 0, spare: 0, labour: 0, leads: 0, batt: 0,
+    work: 0, pres: 0, mf: 0, hrMf: 0, attend: null, attD: 0, attP: 0,
+    fsOn: 0, fsD: 0, tcOk: 0, tcN: 0, fsMin: 0, first: null, sfTask: null,
+    cdiP: 0, cdiD: 0, cdiPa: 0, cdiN: 0, cdi: null,
   }));
   // 24 months back is more than one financial year, so whichever of them fall
   // inside THIS one are the only ones taken
@@ -237,12 +321,16 @@ export function quarterBuckets(se) {
     if (FYof(d) !== fy) return;
     const g = out[FYQ(d.getMonth())];
     g.empty = false;
-    ['sr', 'spare', 'labour', 'leads', 'batt', 'work', 'pres', 'days'].forEach((f) => { g[f] += m[f]; });
-    ['closure', 'first', 'cdi'].forEach((f) => { g[f] += m[f] * m.days; });
+    ['sr', 'maxSr', 'alloc', 'allocOk', 'spare', 'labour', 'leads', 'batt', 'work', 'pres', 'mf', 'hrMf',
+      'days', 'attD', 'attP', 'fsOn', 'fsD', 'tcOk', 'tcN', 'fsMin',
+      'cdiP', 'cdiD', 'cdiPa', 'cdiN'].forEach((f) => { g[f] += m[f]; });
   });
   out.forEach((g) => {
-    ['closure', 'first', 'cdi'].forEach((f) => { g[f] = g.days ? g[f] / g.days : 0; });
-    g.attend = g.work ? (g.pres / g.work) * 100 : 0;
+    g.first = pctOf(g.fsOn, g.fsD);
+    g.sfTask = pctOf(g.allocOk, g.alloc);
+    g.cdi = cdiPct([g.cdiP, g.cdiD, g.cdiPa]);
+    g.attend = g.attD ? (g.attP / g.attD) * 100
+      : ((g.hrMf && g.work) ? (g.pres / (g.work * (g.hrMf / g.mf))) * 100 : null);
   });
   return bifurcate(se, out);
 }
@@ -265,31 +353,31 @@ export const bucketsFor = (se) => (S.gran === 'day' ? dayBuckets(se)
      wavg   day-weighted, because a period's first and last week are partial
    ------------------------------------------------------------------------ */
 export const sumB = (B, f) => B.reduce((a, b) => a + f(b), 0);
-const wavgB = (B, f) => { const d = B.reduce((a, b) => a + b.days, 0) || 1; return B.reduce((a, b) => a + f(b) * b.days, 0) / d; };
-// a per-SR-type closure averages under that type's OWN load, not under the days
-const srwB = (B, f, t) => { const n = sumB(B, (b) => b.srBy[t]); return n ? B.reduce((a, b) => a + f(b) * b.srBy[t], 0) / n : null; };
 
 export const DT_ROWS = [
-  { id: 'sr', lab: 'SR closed', u: 'count', mid: true, val: (b) => b.sr, f: iN,
+  // the EFSR closure count — this is the SR Count commitment
+  { id: 'sr', lab: 'SR closed (EFSR)', u: 'count', mid: true, val: (b) => b.sr, f: iN,
     tot: (B) => iN(sumB(B, (b) => b.sr)),
     kids: () => SR_TYPES.map((t) => ({ lab: t, u: 'count', mid: true, val: (b) => b.srBy[t], f: iN,
       tot: (B) => iN(sumB(B, (b) => b.srBy[t])) })) },
 
-  // no paid-days row: the attendance marks below already carry it
-  { id: 'prod', lab: 'Productivity', u: 'SR / day', mid: true, val: (b) => (b.pres ? b.sr / b.pres : null), f: trim2,
-    tot: (B) => { const p = sumB(B, (b) => b.pres); return p ? trim2(sumB(B, (b) => b.sr) / p) : '–'; } },
+  /* NO PRODUCTIVITY ROW, and no paid-days row either. Productivity divides the
+     MaxTTR close count while the SR row above is the EFSR closure count, so a
+     row here would have put one file's numerator over the other's definition
+     and invited exactly the comparison that is wrong. It is stated once, in the
+     header tile, which names the file it uses. */
 
-  { id: 'spare', lab: 'Spare parts sales', u: '₹ Lakh', val: (b) => b.spare, f: iL,
+  { id: 'spare', lab: 'Spare parts sales (LMS)', u: '₹ Lakh', val: (b) => b.spare, f: iL,
     tot: (B) => iL(sumB(B, (b) => b.spare)),
     kids: () => PART_CATS.map((c) => ({ lab: c, u: '₹ Lakh', val: (b) => b.spareBy[c], f: iL,
       tot: (B) => iL(sumB(B, (b) => b.spareBy[c])) })) },
 
-  { id: 'labour', lab: 'Labour revenue', u: '₹ Lakh', val: (b) => b.labour, f: iL,
+  { id: 'labour', lab: 'Labour revenue (LMS)', u: '₹ Lakh', val: (b) => b.labour, f: iL,
     tot: (B) => iL(sumB(B, (b) => b.labour)),
     kids: () => SR_TYPES.map((t) => ({ lab: t, u: '₹ Lakh', val: (b) => b.labourBy[t], f: iL,
       tot: (B) => iL(sumB(B, (b) => b.labourBy[t])) })) },
 
-  { id: 'leads', lab: 'AMC leads', u: 'count', mid: true, val: (b) => b.leads, f: (v) => String(Math.round(v)),
+  { id: 'leads', lab: 'AMC Generation', u: 'count', mid: true, val: (b) => b.leads, f: (v) => String(Math.round(v)),
     tot: (B) => String(sumB(B, (b) => b.leads)) },
   { id: 'batt', lab: 'Battery sold', u: 'count', mid: true, val: (b) => b.batt, f: (v) => String(Math.round(v)),
     tot: (B) => String(sumB(B, (b) => b.batt)) },
@@ -298,26 +386,69 @@ export const DT_ROWS = [
   // Productivity divides by, and the Present tile in the summary carries the
   // ratio. A P/A mark per day belonged to the attendance register, not to a
   // performance breakdown.
-  { id: 'closure', lab: 'SR / eFSR closure', u: '%', val: (b) => b.closure, f: i1,
-    tot: (B) => i1(wavgB(B, (b) => b.closure)),
-    kids: () => SR_TYPES.map((t) => ({ lab: t, u: '%', val: (b) => (b.srBy[t] ? b.closeBy[t] : null), f: i1,
-      tot: (B) => { const v = srwB(B, (b) => b.closeBy[t], t); return v == null ? '–' : i1(v); } })) },
+  // both struck from their own counts — a day is one day whatever it holds,
+  // and averaging percentages would weight a one-task day like a six-task one
+  /* THE CLOCK, not the percentage, and one row with no children.
+     A day column now shows the TIME he started his first job that day, out of
+     the EFSR file's own task start; a week, month, quarter or year column shows
+     the AVERAGE of those times over its days. That is the figure the business
+     bands this commitment on (10:00 green, 10:30 yellow, later amber), and it
+     is the one a reader can act on — '12.5%' told nobody what time he arrived.
+     The percentage is still what the KPI is SCORED on; it lives on the signed
+     matrix, not here.
+     Averaged over the days he actually WORKED, never over the calendar: a day
+     with no task of his has no arrival time to average in. */
+  { id: 'first', lab: 'First site — start time', u: 'avg time', mid: true,
+    val: (b) => (b.fsD ? b.fsMin / b.fsD : null), f: hhmm,
+    tot: (B) => { const d = sumB(B, (b) => b.fsD);
+      return d ? hhmm(sumB(B, (b) => b.fsMin) / d) : '–'; } },
 
-  { id: 'first', lab: 'First site before 10:00', u: '%', val: (b) => b.first, f: i1,
-    tot: (B) => i1(wavgB(B, (b) => b.first)) },
+  /* The commitment's own name, and a TICK rather than a figure when it is met.
+     '100.0' in a percentage column invites the reader to compare it with 99.4
+     and 87.1 and rank them; the commitment is not a rank, it is a daily habit
+     that was either kept or was not. So a met day is a tick and a missed day
+     keeps its number, which is the only one worth reading.
+
+     Beneath it, the day's two SR movements — ALLOCATED on the task assigned
+     date and CLOSED on the task end date, the same pair the SR Allocation
+     report prints. They are not the parent's arithmetic (that is closed-same-
+     day over tasks); they are the context it needs, because a 60% closure rate
+     on two tasks and on twenty are different conversations. */
+  /* CLOSED over ALLOCATED, as a percentage everywhere — 100 included. A tick
+     for a met day was tried and taken out again: a column of figures with the
+     good ones replaced by a symbol cannot be scanned for a trend, and 100 next
+     to 92 and 78 is the comparison a reader wants. The total is struck from the
+     period's OWN two counts, never averaged from the days'. */
+  { id: 'sfTask', lab: 'Salesforce Task Closure Daily', u: '%', mid: true,
+    val: (b) => pctOf(b.allocOk, b.alloc), f: i1,
+    tot: (B) => { const v = pctOf(sumB(B, (b) => b.allocOk), sumB(B, (b) => b.alloc));
+      return v == null ? '–' : i1(v); },
+    kids: () => [
+      { lab: 'Allocated', u: 'count', mid: true, val: (b) => b.alloc, f: iN,
+        tot: (B) => iN(sumB(B, (b) => b.alloc)) },
+      { lab: 'Closed same day', u: 'count', mid: true, val: (b) => b.allocOk, f: iN,
+        tot: (B) => iN(sumB(B, (b) => b.allocOk)) },
+    ] },
 
   // a rating out of 10 is a small figure like a count, not a money column —
   // it reads centred, and its children are counts
-  { id: 'cdi', lab: 'Customer delight (CDI)', u: '/ 10', mid: true, val: (b) => b.cdi, f: i1,
-    tot: (B) => i1(wavgB(B, (b) => b.cdi)),
+  // struck from the counts at every level, never averaged from percentages
+  { id: 'cdi', lab: 'Customer delight (CDI)', u: '%', val: (b) => b.cdi, f: i1,
+    tot: (B) => { const v = cdiPct([sumB(B, (b) => b.cdiP), sumB(B, (b) => b.cdiD),
+      sumB(B, (b) => b.cdiPa)]); return v == null ? '–' : i1(v); },
+    /* PASSIVE and DETRACTOR, and nothing else — the two Employee Productivity
+       opens, for the reason it gives: the row above IS the percentage, and the
+       percentage is what Promotor already speaks for. Passive is the bucket
+       nobody could see; Detractor is the one that costs. All three are still
+       COUNTED and the formula is untouched — only the two worth reading are
+       drawn. Feedback (N) came off with Promotor: it is the sum of buckets the
+       reader can see plus the one the percentage implies, and this table is
+       eleven rows deep before anything is unfolded. */
     kids: () => [
-      { lab: 'Promotor (P)', u: 'count', mid: true, val: (b) => b.cdiP, f: (v) => String(v), tot: (B) => String(sumB(B, (b) => b.cdiP)) },
-      { lab: 'Passive (P)', u: 'count', mid: true, val: (b) => b.cdiPa, f: (v) => String(v), tot: (B) => String(sumB(B, (b) => b.cdiPa)) },
-      { lab: 'Detractor (D)', u: 'count', mid: true, val: (b) => b.cdiD, f: (v) => String(v), tot: (B) => String(sumB(B, (b) => b.cdiD)) },
-      // below three feedbacks the percentage swings between 0 and 100 and means
-      // nothing — the counts above it are the honest reading for that bucket
-      { lab: 'CDI %', u: '%', val: (b) => (b.cdiN >= 3 ? ((b.cdiP - b.cdiD) / b.cdiN) * 100 : null), f: i1,
-        tot: (B) => { const n = sumB(B, (b) => b.cdiN); return n ? i1(((sumB(B, (b) => b.cdiP) - sumB(B, (b) => b.cdiD)) / n) * 100) : '–'; } },
+      { lab: 'Passive', u: 'count', mid: true, val: (b) => b.cdiPa, f: (v) => String(v),
+        tot: (B) => String(sumB(B, (b) => b.cdiPa)) },
+      { lab: 'Detractor', u: 'count', mid: true, val: (b) => b.cdiD, f: (v) => String(v),
+        tot: (B) => String(sumB(B, (b) => b.cdiD)) },
     ] },
 ];
 
@@ -327,78 +458,119 @@ export const DT_ROWS = [
    survives being read out in front of him.
    ------------------------------------------------------------------------ */
 
-/** The CDI split, struck by the SAME rule the report uses, so the matrix and
-    the report never quote different numbers. */
-export function cdiSplit(sr, rating) {
-  const N = Math.max(3, Math.round(sr / 4));
-  const pSh = Math.max(0.06, Math.min(0.94, (rating - 4.5) / 5.5));
-  const dSh = (1 - pSh) * 0.45;
-  const [P, Pa, D] = spreadInt(N, [pSh, 1 - pSh - dSh, dSh]);
-  return { P, Pa, D, N };
-}
+/** THE FOUR POINTS.
 
-function talkFor(k, se, ctx) {
-  const t = targetFor(k); const v = se.v[k.key];
-  const gap = Array.isArray(t) ? 0 : Math.max(0, t - v);
-  const wk = 4.3 * S.months;
-  switch (k.key) {
-    case 'sr': return { short: `${plural(gap, 'SR')} short`,
-      say: `${iN(v)} SRs closed against ${iN(t)}. ${gap} short — about ${(gap / wk).toFixed(1)} a week.`,
-      ask: `Close ${Math.ceil(gap / wk)} more SRs a week.` };
-    case 'spare': return { short: `₹${iN(gap)} short`,
-      say: `Spare parts billed ₹${iN(v)} against ₹${iN(t)}. That is ₹${iN(se.v.sr ? v / se.v.sr : 0)} of parts attached per SR`
-        + (ctx.bSpareSr != null ? `, where the branch attaches ₹${iN(ctx.bSpareSr)}.` : '.'),
-      ask: `Attach ₹${iN(se.v.sr ? gap / se.v.sr : gap)} more parts per SR — a filter set or a coolant on the jobs already booked.` };
-    case 'labour': return { short: `₹${iN(gap)} short`,
-      say: `Labour billed ₹${iN(v)} against ₹${iN(t)} — ₹${iN(se.v.sr ? v / se.v.sr : 0)} a job`
-        + (ctx.bLabSr != null ? ` against the branch's ₹${iN(ctx.bLabSr)}.` : '.'),
-      ask: `Bill the full labour line on every job; ₹${iN(gap)} over ${se.v.sr} SRs is ₹${iN(se.v.sr ? gap / se.v.sr : gap)} a job.` };
-    case 'amcLead': return { short: `${plural(gap, 'lead')} short`,
-      say: `${plural(v, 'AMC lead')} against ${t}. On ${se.v.sr} SRs that is one lead every ${se.v.amcLead ? Math.round(se.v.sr / se.v.amcLead) : se.v.sr} jobs.`,
-      ask: `Raise ${gap} more — one AMC ask on every ${Math.max(1, Math.round(se.v.sr / Math.max(1, t)))}th job covers it.` };
-    case 'battery': return { short: `${gap} batter${gap === 1 ? 'y' : 'ies'} short`,
-      say: `${v} batteries sold against ${t}. Every wet PM is a battery check.`,
-      ask: `${gap} more this month — check and quote on the PM visits already scheduled.` };
-    case 'lms': return { short: `${(100 - v).toFixed(1)}% not updated`,
-      say: `${v.toFixed(1)}% of leads updated on LMS. The commitment is every one of them.`,
-      ask: 'Update the same day. An unlogged lead is a lead the branch cannot follow.' };
-    case 'first': return { short: `${plural(Math.round((se.workDays * (100 - v)) / 100), 'day')} late`,
-      say: `First site before 10:00 on ${v.toFixed(1)}% of days — roughly ${Math.round((se.workDays * (100 - v)) / 100)} of ${se.workDays} working days started late.`,
-      ask: 'First call on site by 10:00 every day. Report the exception the evening before, not on the day.' };
-    case 'sfTask': return { short: `${plural(Math.round((se.v.sr * (100 - v)) / 100), 'task')} left open`,
-      say: `${v.toFixed(1)}% of tasks closed before leaving site — about ${Math.round((se.v.sr * (100 - v)) / 100)} of ${se.v.sr} tasks left open.`,
-      ask: 'Close the task on the app before the vehicle moves.' };
-    case 'attend': {
-      const abs = Math.max(0, se.workDays - se.present);
-      return { short: `${plural(abs, 'day')} absent`,
-        say: `Present ${se.present} of ${se.workDays} working days — ${abs} absent. At his own billing that is ₹${iN(ctx.perDay)} a day of work not done.`,
-        ask: `Attendance above ${targetFor(k)}% means no more than ${plural(Math.floor((se.workDays * (100 - S.targets.attend)) / 100), 'absent day')} in a month.` };
+    What replaced the old "what the shortfall is worth" section, and why: that
+    block priced every gap in rupees and then read the price out as a sentence.
+    It was built when the figures were generated and it does not survive real
+    data. A man the LMS file attributes no conversion to had "₹1,50,000 at
+    stake", "earns ₹0 a job", "attaches ₹0 of parts a job where the branch
+    attaches ₹0" and an ask to "raise one AMC on every 2th job". Every one of
+    those is a null read as a zero, dressed up as advice.
+
+    Four points instead, each one thing a manager can act on, each built ONLY
+    from figures the files actually carry, and each carrying its own comparison
+    so the number means something. A point whose source has nothing to say
+    prints what is missing and what to upload — never a zero.
+
+    The four are chosen to cover the nine commitments without repeating them:
+    what he DID, what it EARNED, whether he was THERE, and how the work LANDED.
+*/
+function pointsOf(se, br) {
+  const P = [];
+  const cmp = (v, t) => (v == null ? 'na' : (v >= t ? 'ok' : (v >= t * 0.85 ? 'near' : 'miss')));
+  /* The EFSR file answers two questions and can answer one without the other:
+     an engineer has days he worked but no task with an end date on it, so
+     first-site exists and same-day closure does not. Each clause is therefore
+     built only where its own figure is. */
+  const disc = () => {
+    const bits = [];
+    if (se.v.first != null) {
+      bits.push(`first site before 10:00 on <b>${se.fsOn} of ${se.fsDays}</b> days`);
     }
-    case 'closure': {
-      const late = Math.round((se.v.sr * (100 - v)) / 100);
-      return { short: `${plural(late, 'SR')} late`,
-        say: `${v.toFixed(1)}% closed inside the timeline against ${t}% — about ${late} of ${se.v.sr} SRs ran past MaxTTR.`,
-        ask: 'No SR past its timeline. Ask the coordinator to flag anything open on day two.' };
+    if (se.v.sfTask != null) {
+      bits.push(`<b>${se.v.sfTask}%</b> of the SRs allocated to him closed the same day`);
     }
-    case 'cdi': {
-      const c = ctx.cdi;
-      return { short: `${(t - v).toFixed(1)} pts below`,
-        say: `Rated ${v.toFixed(1)} of 10 against ${t}. ${c.D} of ${plural(c.N, 'customer')} came back as ${c.D === 1 ? 'a detractor' : 'detractors'} this period`
-          + (c.P ? `, ${c.P} as promotors.` : '.'),
-        ask: 'Explain the work done and the site status before leaving — that one habit moves the rating more than anything else.' };
-    }
-    case 'wetPm': {
-      const [lo, hi] = S.targets.wetPm; const fast = v < lo;
-      return { short: fast ? `${(lo - v).toFixed(2)} hrs under` : `${(v - hi).toFixed(2)} hrs over`,
-        say: fast
-          ? `Wet PM jobs average ${v.toFixed(2)} hrs against the ${lo}–${hi} hr window — under the time the checklist takes.`
-          : `Wet PM jobs average ${v.toFixed(2)} hrs against the ${lo}–${hi} hr window — longer than the job should need.`,
-        ask: fast
-          ? 'Work the full PM checklist. A short PM is what comes back as a breakdown.'
-          : 'Review the PM sequence with the branch — the time is going somewhere it should not.' };
-    }
-    default: return { short: '—', say: '', ask: '' };
-  }
+    return bits.length ? bits.join(' and ') : '';
+  };
+
+  // 1 — OUTPUT. The volume commitment and the rate it was done at, against
+  // the branch, because a number with nothing beside it is not a reading.
+  const srT = targetFor(COMMITMENTS.find((k) => k.key === 'sr'));
+  P.push(se.v.sr == null ? {
+    k: 'out', lab: 'Work done', tone: 'na', big: '–',
+    sub: 'not in the MaxTTR file',
+    say: 'The \'Response Time & MaxTTR Details\' import does not name this engineer, so his SR '
+      + 'count and productivity are blank and both are left out of his score. Check how his name '
+      + 'is spelt in that file against the SE UID Master.',
+  } : {
+    k: 'out', lab: 'Work done', tone: cmp(se.v.sr, srT), big: iN(se.v.sr),
+    sub: `SRs closed · commitment ${iN(srT)}`,
+    say: `${iN(se.v.sr)} SRs over ${trim2(Math.round(se.workDays))} working days — `
+      + `<b>${trim2(se.v.prod)} a working day</b>`
+      + (br.prod != null ? `, against <b>${trim2(br.prod)}</b> for the rest of ${se.branch}.` : '.')
+      + (se.v.sr < srT ? ` ${iN(srT - se.v.sr)} short of the ${iN(srT)} committed.` : ' Commitment met.'),
+  });
+
+  // 2 — WHAT IT EARNED. Spare and labour together, because the commitment is
+  // read as revenue and one without the other is half the answer.
+  const spT = targetFor(COMMITMENTS.find((k) => k.key === 'spare'));
+  const lbT = targetFor(COMMITMENTS.find((k) => k.key === 'labour'));
+  const rev = (se.v.spare == null && se.v.labour == null)
+    ? null : (se.v.spare || 0) + (se.v.labour || 0);
+  P.push(rev == null ? {
+    k: 'rev', lab: 'Revenue attributed', tone: 'na', big: '–',
+    sub: 'no converted lead on his UID',
+    say: 'The LMS file attributes no converted lead to this engineer in the period, so spare and '
+      + 'labour are blank rather than zero. Most conversion money in that file carries no Service '
+      + 'Engineer UID at all — it belongs to the branch and to nobody in it.',
+  } : {
+    k: 'rev', lab: 'Revenue attributed', tone: cmp(rev, spT + lbT),
+    big: `₹${iL(rev)}L`, sub: `spare + labour · commitment ₹${iL(spT + lbT)}L`,
+    say: `Spare <b>₹${iN(se.v.spare || 0)}</b> of ₹${iN(spT)} and labour `
+      + `<b>₹${iN(se.v.labour || 0)}</b> of ₹${iN(lbT)}, on his own converted LMS leads`
+      + ((se.v.sr && rev) ? ` — ₹${iN(rev / se.v.sr)} a job.` : '.')
+      + ` AMC generation ${se.v.amcLead == null ? 'not attributable' : `${se.v.amcLead} of ${targetFor(COMMITMENTS.find((k) => k.key === 'amcLead'))}`}`
+      + `, batteries ${se.v.battery == null ? 'not attributable' : `${trim2(se.v.battery)} of ${targetFor(COMMITMENTS.find((k) => k.key === 'battery'))}`}.`,
+  });
+
+  // 3 — WAS HE THERE. Attendance is the one commitment a man can be dismissed
+  // over, so it is never inferred: HR said it or it is blank.
+  const atT = targetFor(COMMITMENTS.find((k) => k.key === 'attend'));
+  P.push(se.present == null ? {
+    k: 'att', lab: 'Days worked', tone: 'na', big: '–',
+    sub: 'HR attendance not uploaded',
+    say: `The period holds <b>${trim2(Math.round(se.workDays))} working days</b> from the AOP `
+      + 'master, but HR has not sent the Attendance Summary for it, so attendance is blank and is '
+      + 'left out of his score.'
+      + (se.taskEnd != null ? ` The EFSR file does show him finishing a job on <b>${se.taskEnd} days</b>.` : ''),
+  } : {
+    k: 'att', lab: 'Days worked', tone: cmp(se.v.attend, atT),
+    big: `${trim2(se.present)}/${trim2(Math.round(se.workDays))}`,
+    sub: `days present · ${se.v.attend}% against ${atT}%`,
+    say: `Present <b>${trim2(se.present)}</b> of ${trim2(Math.round(se.workDays))} working days `
+      + `(<b>${se.v.attend}%</b>), on HR's own attendance`
+      + (se.taskEnd != null ? `, and finishing a job in the field on <b>${se.taskEnd}</b> of them.` : '.'),
+  });
+
+  // 4 — HOW THE WORK LANDED. The customer's verdict and the two habits that
+  // decide it, together: they are one conversation, not three.
+  const cdT = targetFor(COMMITMENTS.find((k) => k.key === 'cdi'));
+  P.push(se.v.cdi == null ? {
+    k: 'qual', lab: 'How it landed', tone: 'na', big: '–',
+    sub: 'no customer feedback on record',
+    say: 'The CDI Detail Report holds no feedback for this engineer in the period.'
+      + (disc() ? ` On discipline: ${disc()}.` : ''),
+  } : {
+    k: 'qual', lab: 'How it landed', tone: cmp(se.v.cdi, cdT), big: `${se.v.cdi}%`,
+    sub: `CDI from ${plural(se.cdiN, 'feedback')} · target ${cdT}%`,
+    say: `<b>${se.cdiP}</b> promotor${se.cdiP === 1 ? '' : 's'} and <b>${se.cdiD}</b> detractor`
+      + `${se.cdiD === 1 ? '' : 's'} of ${plural(se.cdiN, 'customer')}.`
+      + (disc() ? ` On discipline: ${disc()}.`
+        : ' The EFSR file has no task of his in the period, so the discipline figures are blank.'),
+  });
+
+  return P;
 }
 
 /** Everything the signed matrix asserts. */
@@ -422,12 +594,21 @@ export function reviewOf(se, allSes) {
   const rev = se.v.spare + se.v.labour;
   const perSR = se.v.sr ? rev / se.v.sr : 0;
   const perDay = se.present ? rev / se.present : 0;
-  const absent = Math.max(0, se.workDays - se.present);
+  // null, not a number, when HR has not sent the month: 'absent every day' is
+  // what a missing file would otherwise assert
+  const absent = se.present == null ? null
+    : Math.max(0, +(Math.round(se.workDays || 0) - se.present).toFixed(1));
 
   // How he sits against the people doing the same job in the same branch — the
   // only fair comparison, and the one he will make himself.
   const peers = (allSes || []).filter((x) => x.bid === se.bid && x.key !== se.key);
-  const pAvg = (f) => (peers.length ? peers.reduce((a, x) => a + f(x), 0) / peers.length : null);
+  // over the peers who HAVE the figure — SR CLOSED is null for an engineer the
+  // MaxTTR file never names, and one such peer would make the branch average
+  // NaN and print as nothing at all
+  const pAvg = (f) => {
+    const k = peers.map(f).filter((x) => x != null && isFinite(x));
+    return k.length ? k.reduce((a, x) => a + x, 0) / k.length : null;
+  };
   const branch = {
     n: peers.length + 1,
     rank: (allSes || []).filter((x) => x.bid === se.bid).sort((a, b) => b.score - a.score)
@@ -436,23 +617,6 @@ export function reviewOf(se, allSes) {
     spareSr: pAvg((x) => (x.v.sr ? x.v.spare / x.v.sr : 0)),
     labSr: pAvg((x) => (x.v.sr ? x.v.labour / x.v.sr : 0)),
   };
-  const ctx = { perSR, perDay, bSpareSr: branch.spareSr, bLabSr: branch.labSr, cdi: cdiSplit(se.v.sr, se.v.cdi) };
-
-  // Money priced at the ENGINEER'S OWN rates, never a branch average. Where a
-  // gap has no defensible rupee value it carries none rather than an invented one.
-  const worthOf = (k) => {
-    const t = targetFor(k); const v = se.v[k.key];
-    if (k.key === 'sr') return Math.max(0, t - v) * perSR;
-    if (k.key === 'spare' || k.key === 'labour') return Math.max(0, t - v);
-    if (k.key === 'attend') return absent * perDay;
-    return null;
-  };
-  const stake = COMMITMENTS
-    .filter((k) => { const a = A(k); return a != null && a < 100; })
-    .map((k) => ({ k, pct: A(k), worth: worthOf(k), ...talkFor(k, se, ctx) }))
-    .sort((a, b) => (b.worth || 0) - (a.worth || 0) || a.pct - b.pct);
-  const total = stake.reduce((a, x) => a + (x.worth || 0), 0);
-  const focus = stake.find((x) => x.worth) || stake[0] || null;
 
   // The call. Compliance and the support the branch actually gave both weigh on
   // it: an engineer the branch never kitted out is not a performance case.
@@ -481,29 +645,33 @@ export function reviewOf(se, allSes) {
     why = `Score ${se.score.toFixed(1)} with ${miss.length} commitments missed. Put a written plan and a review date in place.`;
   }
 
-  // Skill gap, application gap or discipline — three problems, three answers
+  // Skill gap, application gap or discipline — three problems, three answers.
+  // Kept because the KPI table's own Status column reads it; the paragraphs it
+  // used to feed are gone (see pointsOf).
   const actions = miss.map((k) => {
     const t = hasTraining(k);
-    if (t === null) return { k, type: 'Discipline', tone: 'bad', act: 'No training closes this — set the expectation and follow it daily.' };
-    if (t) return { k, type: 'Application', tone: 'warn', act: 'Trained already — this is coaching and follow-up on site, not another course.' };
-    return { k, type: 'Skill', tone: 'warn', act: 'No training on record that covers this — nominate for the next batch.' };
+    if (t === null) return { k, type: 'Discipline', tone: 'bad' };
+    if (t) return { k, type: 'Application', tone: 'warn' };
+    return { k, type: 'Skill', tone: 'warn' };
   });
 
-  const skillGaps = actions.filter((a) => a.type === 'Skill').length;
-  const catalogue = skillGaps >= 3
-    ? `${skillGaps} of these have no course on record that covers them. The Training Report is almost entirely `
-      + 'product training — worth checking the gap against the training plan before nominating him for anything.'
-    : null;
-
-  return { met, miss, near, comply, support, tr, stake, total, focus, branch,
-    asks: stake.slice(0, 3).map((x) => x.ask),
-    rev, perSR, perDay, absent, verdict, tone, why, actions, catalogue, tenure: tenureOf(se) };
+  return { met, miss, near, comply, support, tr, branch,
+    points: pointsOf(se, branch),
+    rev, perSR, perDay, absent, verdict, tone, why, actions, tenure: tenureOf(se) };
 }
 
 /** The short summary that sits between the numbers and the charts. */
 export function summaryOf(se, B) {
-  const T = (k) => B.reduce((a, b) => a + b[k], 0);
+  const T = (k) => B.reduce((a, b) => a + (b[k] || 0), 0);
   const sr = T('sr'); const pres = T('pres'); const work = T('work');
+  // How many MONTHS the columns are worth, and how many of them HR has sent.
+  // A quarter or a financial year is read as its average month — 484 of 626
+  // days is not a figure anyone holds in their head — and the average has to
+  // be taken over the months there is attendance FOR, not over all of them.
+  const mf = T('mf') || 1; const hrMf = T('hrMf');
+  const workM = work / mf;                       // man-days in an average month
+  const presM = hrMf ? pres / hrMf : null;       // days present in an average month
+  const workHr = work * (hrMf / mf);             // man-days of the covered months
   const rev = T('spare') + T('labour');
   const revT = S.targets.spare + S.targets.labour;
   // how many months the WINDOW SHOWN is worth — a month view of a one-month
@@ -517,14 +685,19 @@ export function summaryOf(se, B) {
   const srMix = SR_TYPES.map((t) => ({ t, n: B.reduce((a, b) => a + b.srBy[t], 0) })).sort((a, b) => b.n - a.n);
   const partMix = PART_CATS.map((c) => ({ c, v: B.reduce((a, b) => a + b.spareBy[c], 0) })).sort((a, b) => b.v - a.v);
   const P = T('cdiP'); const Pa = T('cdiPa'); const Dt = T('cdiD'); const N = T('cdiN');
-  const worstType = SR_TYPES.map((t) => {
-    const n = B.reduce((a, b) => a + b.srBy[t], 0);
-    return { t, n, c: n ? B.reduce((a, b) => a + b.closeBy[t] * b.srBy[t], 0) / n : null };
-  }).filter((x) => x.n >= 3 && x.c != null).sort((a, b) => a.c - b.c)[0];
 
   const say = [];
-  say.push(`Closed <b>${sr} SRs</b> over <b>${pres} days present</b> — <b>${pres ? (sr / pres).toFixed(2) : '–'} a day present</b>, `
-    + `against the ${iN(S.targets.sr)}-a-month commitment (${(S.targets.sr * nMonths).toFixed(0)} over the ${nMonths < 1.02 ? 'month' : `${nMonths.toFixed(0)} months`} shown).`);
+  // An engineer with no row in the MaxTTR file has no SR figure at all, and the
+  // buckets carry zeroes for him because a bucket has to carry a number. Saying
+  // "closed 0 SRs" out of those zeroes turns a gap in the data into an
+  // accusation, so the sentence says what is actually true instead.
+  say.push(se.srDay
+    ? `Closed <b>${sr} SRs</b> over <b>${pres} days present</b> — <b>${pres ? (sr / pres).toFixed(2) : '–'} a day present</b>, `
+      + `against the ${iN(S.targets.sr)}-a-month commitment (${(S.targets.sr * nMonths).toFixed(0)} over the ${nMonths < 1.02 ? 'month' : `${nMonths.toFixed(0)} months`} shown).`
+    : '<b>No SR history.</b> The \'Response Time &amp; MaxTTR Details\' import does not name this '
+      + 'engineer, so his SR count, his productivity and everything priced off them are blank '
+      + 'rather than zero — and the SR commitment is left out of his score. Check the spelling of '
+      + 'his name in that file against the SE UID Master.');
   if (srMix[0] && srMix[0].n) {
     say.push(`The load is mostly <b>${srMix[0].t}</b> (${Math.round((srMix[0].n / Math.max(1, sr)) * 100)}% of SRs)`
       + (srMix[1] && srMix[1].n ? `, then ${srMix[1].t} (${Math.round((srMix[1].n / Math.max(1, sr)) * 100)}%)` : '') + '.');
@@ -532,19 +705,22 @@ export function summaryOf(se, B) {
   say.push(`Revenue <b>₹${(rev / 1e5).toFixed(2)} L</b> — spare ₹${(T('spare') / 1e5).toFixed(2)} L`
     + (partMix[0] && partMix[0].v ? ` (mostly ${partMix[0].c})` : '')
     + `, labour ₹${(T('labour') / 1e5).toFixed(2)} L — against ₹${((revT * nMonths) / 1e5).toFixed(2)} L committed.`);
-  say.push(nMonths > 1.2
-    ? `Over ${nMonths.toFixed(0)} months: <b>${work} working days</b>, present on <b>${pres}</b> `
-      + `(${work ? ((pres / work) * 100).toFixed(1) : '0'}%) — an average of `
-      + `<b>${Math.round(pres / nMonths)} of ${Math.round(work / nMonths)}</b> a month.`
-    : `The period holds <b>${work} working days</b> — present on <b>${pres}</b>, absent on <b>${work - pres}</b> `
-      + `(${work ? ((pres / work) * 100).toFixed(1) : '0'}%).`);
+  const attPct = (workHr && hrMf) ? ((pres / workHr) * 100).toFixed(1) : null;
+  say.push(hrMf === 0
+    ? `The period holds <b>${trim2(workM)} working days</b> from the AOP master, but HR has not `
+      + 'uploaded the Attendance Summary for it — days present and attendance are blank rather '
+      + 'than zero, and Attendance is left out of his score.'
+    : mf > 1.2
+      ? `Over ${Math.round(mf)} months: <b>${trim2(work)} working days</b>, present on <b>${trim2(pres)}</b> `
+        + `(${attPct}%) — an average of <b>${trim2(presM)} of ${trim2(workM)}</b> a month`
+        + (hrMf < mf - 0.01 ? `, from the ${Math.round(hrMf)} month${Math.round(hrMf) === 1 ? '' : 's'} HR has sent.` : '.')
+      : `The period holds <b>${trim2(workM)} working days</b> — present on <b>${trim2(pres)}</b>, `
+        + `absent on <b>${trim2(Math.max(0, workM - pres))}</b> (${attPct}%).`);
   say.push(`Customer feedback: <b>${P} promotor · ${Pa} passive · ${Dt} detractor</b> out of ${N}.`);
-  if (worstType && worstType.c < S.targets.closure) {
-    say.push(`Closure is weakest on <b>${worstType.t}</b> SRs at ${worstType.c.toFixed(1)}% against the ${S.targets.closure}% timeline.`);
-  }
   say.push(missed.length
     ? `Strongest on <b>${plain(best.short)}</b>; short on <b>${missed.slice(0, 3).map((k) => plain(k.short)).join('</b>, <b>')}</b>.`
     : `Every commitment kept — strongest on <b>${plain(best.short)}</b>.`);
 
-  return { sr, pres, work, rev, revT, nMonths, met, say };
+  return { sr, pres, work, rev, revT, nMonths, met, say,
+    mf, hrMf, workM, presM, workHr, attPct };
 }

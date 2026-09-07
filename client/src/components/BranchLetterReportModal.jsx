@@ -4,6 +4,8 @@ import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { reflowLetterReferencesHtml } from '../utils/letterReferences';
 import { letterBodyTopMm, normalizeLetterBodyHtml } from '../utils/letterLayout';
+import { flattenListMarkers } from '../utils/letterPdfMarkers';
+import { buildAttachmentPageImages } from '../utils/printAttachments';
 
 const themeColor = '#2f3192';
 
@@ -114,7 +116,26 @@ const letterSliceBlank = (cnv) => {
     } catch (e) { return false; }
 };
 
-const generateBandedLetterPdf = async (bodyHtml) => {
+// Stored letters keep the rendered letter PDF as the FIRST attachment (see the
+// composers' handleSendLetter). The letter body is rendered here from its HTML,
+// so that leading entry is stripped — otherwise the letter would appear twice.
+const stripEmbeddedLetterPdf = (attachments, subject) => {
+    const atts = attachments || [];
+    if (atts.length === 0) return atts;
+    const wanted = String(subject || 'Letter').trim()
+        .replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').slice(0, 120).toLowerCase();
+    const first = atts[0] || {};
+    const firstName = (first.name || '').toLowerCase();
+    const firstType = (first.type || '').toLowerCase();
+    const isPdf = firstType === 'application/pdf' || firstName.endsWith('.pdf');
+    if (isPdf && (firstName === `${wanted}.pdf` || firstName.includes('letter')
+        || (subject && firstName.includes(String(subject).toLowerCase().slice(0, 12))))) {
+        return atts.slice(1);
+    }
+    return atts;
+};
+
+const generateBandedLetterPdf = async (bodyHtml, attachments = []) => {
     if (!window.html2canvas) await loadLetterScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
     if (!window.jspdf) await loadLetterScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
 
@@ -172,6 +193,9 @@ const generateBandedLetterPdf = async (bodyHtml) => {
         '</style>' +
         bodyHtml;
     document.body.appendChild(holder);
+    // html2canvas draws a list's ::marker tiny and above the line —
+    // write the bullets/numbers in as real text first
+    flattenListMarkers(holder);
 
     // Strip presentational attributes that force top-alignment / fixed heights.
     // Letter table templates often use <th valign="top"> and <tr height="40">.
@@ -263,6 +287,28 @@ const generateBandedLetterPdf = async (bodyHtml) => {
             if (headerUrl && headerH > 0) pdf.addImage(headerUrl, 'PNG', 0, 0, pageW, headerH);
             if (footerUrl && footerH > 0) pdf.addImage(footerUrl, 'PNG', 0, pageH - footerH, pageW, footerH);
         }
+
+        // ── Attachment pages — one A4 sheet per image / per PDF page, a small
+        // grey label on top, the content centred and shrunk to fit. Built by the
+        // shared print util (memoised), so re-opening the same letter is instant.
+        try {
+            const attPages = await buildAttachmentPageImages(attachments);
+            for (const pg of attPages) {
+                pdf.addPage();
+                pdf.setFont('helvetica', 'bold');
+                pdf.setFontSize(8);
+                pdf.setTextColor(110);
+                pdf.text(String(pg.label || '').slice(0, 110), 8, 6);
+                if (pg.src && pg.wPx && pg.hPx) {
+                    const boxX = 8, boxY = 10;
+                    const boxW = pageW - 16, boxH = pageH - boxY - 8;
+                    const mmPerPx = Math.min(boxW / pg.wPx, boxH / pg.hPx);
+                    const wMm = pg.wPx * mmPerPx, hMm = pg.hPx * mmPerPx;
+                    pdf.addImage(pg.src, 'JPEG', boxX + (boxW - wMm) / 2, boxY + (boxH - hMm) / 2, wMm, hMm);
+                }
+            }
+        } catch (e) { /* attachments must never block the letter itself */ }
+
         return pdf.output('datauristring').split(',')[1];
     } finally {
         document.body.removeChild(holder);
@@ -438,7 +484,19 @@ const BranchLetterReportModal = ({ isOpen, onClose, branch, branchDisplayName, a
             const rawHtml = normalizeLetterBodyHtml(reflowLetterReferencesHtml(res.data?.letter_html || ''));
             if (!rawHtml) { alert('This letter has no content to display.'); return; }
             const bodyHtml = rawHtml.replace(/<img\b[^>]*?(?:max-width\s*:\s*780px|width\s*:\s*100%)[^>]*?>/gi, '');
-            const b64 = await generateBandedLetterPdf(bodyHtml);
+
+            // The letter's own attachments become extra pages of the same PDF,
+            // so View / Print / Download all carry them. The full record (with
+            // attachment content) comes from the engagement record endpoint;
+            // if that fails the letter still renders alone.
+            let attachments = [];
+            try {
+                const recRes = await axios.get(`${apiBaseUrl}/v1/engagement/letter/record/${row.id}`);
+                attachments = stripEmbeddedLetterPdf(
+                    recRes.data?.attachments || [], recRes.data?.subject || res.data?.subject || '');
+            } catch (e) { attachments = []; }
+
+            const b64 = await generateBandedLetterPdf(bodyHtml, attachments);
             if (!b64) { alert('Could not render the letter.'); return; }
             const blobUrl = URL.createObjectURL(new Blob([letterBase64ToBytes(b64)], { type: 'application/pdf' }));
             if (pdfUrl) URL.revokeObjectURL(pdfUrl);

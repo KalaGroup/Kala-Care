@@ -50,7 +50,7 @@ def _resolve_name(db: Session, user_id: Optional[str], fallback: Optional[str] =
 # ---------------- APPLICATION CODES (master data) ---------------- #
 
 @router.get("/app-codes")
-async def list_app_codes(slim: bool = False, db: Session = Depends(get_db)):
+def list_app_codes(slim: bool = False, db: Session = Depends(get_db)):
     """Read for any logged-in user (used by Service Selection, Reports and Master).
     slim=true returns only the identity fields + each app's distinct service
     hours — all the Master Report's coverage matrix needs, at a fraction of
@@ -59,14 +59,14 @@ async def list_app_codes(slim: bool = False, db: Session = Depends(get_db)):
 
 
 @router.get("/app-codes/last-updated")
-async def app_codes_last_updated(db: Session = Depends(get_db)):
+def app_codes_last_updated(db: Session = Depends(get_db)):
     """Newest master change + total app codes — the Import Data tab's
     "Last data update" banner (mirrors /import/last-updated)."""
     return {"success": True, **mc.master_last_updated(db)}
 
 
 @router.post("/app-codes")
-async def create_app_code(
+def create_app_code(
     payload: AppCodeIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -79,7 +79,7 @@ async def create_app_code(
 
 
 @router.put("/app-codes/{app_code}")
-async def update_app_code(
+def update_app_code(
     app_code: str,
     payload: AppCodeUpdate,
     user_id: Optional[str] = Header(None),
@@ -93,7 +93,7 @@ async def update_app_code(
 
 
 @router.delete("/app-codes/{app_code}")
-async def delete_app_code(
+def delete_app_code(
     app_code: str,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -105,7 +105,7 @@ async def delete_app_code(
 
 
 @router.post("/app-codes/import")
-async def import_app_codes(
+def import_app_codes(
     payload: ImportIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -122,12 +122,12 @@ async def import_app_codes(
 # ---------------- SERVICES ---------------- #
 
 @router.get("/services")
-async def list_services(db: Session = Depends(get_db)):
+def list_services(db: Session = Depends(get_db)):
     return {"success": True, "items": mc.list_services(db)}
 
 
 @router.put("/services/{key}")
-async def rename_service(
+def rename_service(
     key: str,
     payload: ServiceRename,
     user_id: Optional[str] = Header(None),
@@ -141,7 +141,7 @@ async def rename_service(
 # ---------------- APP MAPPING (assets vs master) ---------------- #
 
 @router.get("/app-mapping")
-async def app_mapping(
+def app_mapping(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -154,7 +154,7 @@ async def app_mapping(
 
 
 @router.get("/asset-commissioning")
-async def asset_commissioning(db: Session = Depends(get_db)):
+def asset_commissioning(db: Session = Depends(get_db)):
     """Latest commissioning date per app code (any signed-in user). Feeds the
     Service Applicability coverage tab, which is not Master-Admin-only."""
     return {"success": True, "items": mc.asset_commissioning(db)}
@@ -163,12 +163,12 @@ async def asset_commissioning(db: Session = Depends(get_db)):
 # ---------------- SEARCH ACTIVITY ---------------- #
 
 @router.get("/activity")
-async def list_activity(limit: int = 1000, db: Session = Depends(get_db)):
+def list_activity(limit: int = 1000, db: Session = Depends(get_db)):
     return {"success": True, "items": mc.list_activity(db, limit)}
 
 
 @router.post("/activity")
-async def log_activity(
+def log_activity(
     payload: ActivityIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),

@@ -65,7 +65,7 @@ def _resolve_name(db: Session, user_id: Optional[str], fallback: Optional[str] =
 # ---------------- BOOTSTRAP (master points + categories) ---------------- #
 
 @router.get("/bootstrap")
-async def bootstrap(
+def bootstrap(
     user_id: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
@@ -78,7 +78,7 @@ async def bootstrap(
 # ---------------- MEETINGS ---------------- #
 
 @router.get("/meetings")
-async def list_meetings(
+def list_meetings(
     branch_code: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
@@ -153,7 +153,7 @@ async def edit_meeting(
 
 
 @router.delete("/meetings/{meeting_id}")
-async def delete_meeting(
+def delete_meeting(
     meeting_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -168,7 +168,7 @@ async def delete_meeting(
 # ---------------- MEETING DRAFT (auto-saved wizard state) ---------------- #
 
 @router.get("/draft")
-async def get_draft(
+def get_draft(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -182,7 +182,7 @@ async def get_draft(
 
 
 @router.put("/draft")
-async def save_draft(
+def save_draft(
     payload: DraftIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -199,7 +199,7 @@ async def save_draft(
 
 
 @router.delete("/draft")
-async def delete_draft(
+def delete_draft(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -216,7 +216,7 @@ async def delete_draft(
 # ---------------- MASTER POINTS ---------------- #
 
 @router.post("/master-points")
-async def create_master_point(
+def create_master_point(
     payload: MasterPointIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -228,7 +228,7 @@ async def create_master_point(
 
 
 @router.put("/master-points/{point_id}")
-async def update_master_point(
+def update_master_point(
     point_id: int,
     payload: MasterPointUpdate,
     user_id: Optional[str] = Header(None),
@@ -241,7 +241,7 @@ async def update_master_point(
 
 
 @router.delete("/master-points/{point_id}")
-async def delete_master_point(
+def delete_master_point(
     point_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -256,7 +256,7 @@ async def delete_master_point(
 # ---------------- MEETING TYPES ---------------- #
 
 @router.post("/meeting-types")
-async def create_meeting_type(
+def create_meeting_type(
     payload: MeetingTypeIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -268,7 +268,7 @@ async def create_meeting_type(
 
 
 @router.put("/meeting-types/{type_id}")
-async def update_meeting_type(
+def update_meeting_type(
     type_id: int,
     payload: MeetingTypeUpdate,
     user_id: Optional[str] = Header(None),
@@ -281,7 +281,7 @@ async def update_meeting_type(
 
 
 @router.delete("/meeting-types/{type_id}")
-async def delete_meeting_type(
+def delete_meeting_type(
     type_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -296,7 +296,7 @@ async def delete_meeting_type(
 # ---------------- CATEGORIES ---------------- #
 
 @router.post("/categories")
-async def create_category(
+def create_category(
     payload: CategoryIn,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -308,7 +308,7 @@ async def create_category(
 
 
 @router.put("/categories/{name}")
-async def update_category(
+def update_category(
     name: str,
     payload: CategoryUpdate,
     user_id: Optional[str] = Header(None),
@@ -321,7 +321,7 @@ async def update_category(
 
 
 @router.delete("/categories/{name}")
-async def delete_category(
+def delete_category(
     name: str,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -336,7 +336,7 @@ async def delete_category(
 # ---------------- MASTER FOLDER: FILE STORE (master_admin only) ---------------- #
 
 @router.get("/folders")
-async def list_folders(
+def list_folders(
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -347,7 +347,7 @@ async def list_folders(
 
 
 @router.post("/folders")
-async def create_folder(
+def create_folder(
     name: str = Form(...),
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -359,7 +359,7 @@ async def create_folder(
 
 
 @router.put("/folders/{folder_id}")
-async def rename_folder(
+def rename_folder(
     folder_id: int,
     name: str = Form(...),
     user_id: Optional[str] = Header(None),
@@ -372,7 +372,7 @@ async def rename_folder(
 
 
 @router.delete("/folders/{folder_id}")
-async def delete_folder(
+def delete_folder(
     folder_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -385,7 +385,7 @@ async def delete_folder(
 
 
 @router.get("/folders/{folder_id}/files")
-async def list_folder_files(
+def list_folder_files(
     folder_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -411,7 +411,7 @@ async def upload_files(
 
 
 @router.delete("/files/{file_id}")
-async def delete_file(
+def delete_file(
     file_id: int,
     user_id: Optional[str] = Header(None),
     user_role: Optional[str] = Header(None),
@@ -427,7 +427,7 @@ async def delete_file(
 # load them directly (same pattern as the Knowledge Bank); the folder UI that
 # exposes these ids is only ever rendered for the Master Admin.
 @router.get("/files/{file_id}/view")
-async def view_file(file_id: int, db: Session = Depends(get_db)):
+def view_file(file_id: int, db: Session = Depends(get_db)):
     row = mf.get_file(db, file_id)
     if row.data is None:
         raise HTTPException(status_code=404, detail="File data is missing")
@@ -436,7 +436,7 @@ async def view_file(file_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/files/{file_id}/download")
-async def download_file(file_id: int, db: Session = Depends(get_db)):
+def download_file(file_id: int, db: Session = Depends(get_db)):
     row = mf.get_file(db, file_id)
     if row.data is None:
         raise HTTPException(status_code=404, detail="File data is missing")
@@ -447,7 +447,7 @@ async def download_file(file_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/folders/{folder_id}/download")
-async def download_folder(folder_id: int, db: Session = Depends(get_db)):
+def download_folder(folder_id: int, db: Session = Depends(get_db)):
     name, buffer = mf.build_folder_zip(db, folder_id)
     safe = (name or "folder").replace('"', "").strip() or "folder"
     return StreamingResponse(buffer, media_type="application/zip",

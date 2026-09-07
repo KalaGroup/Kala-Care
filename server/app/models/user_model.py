@@ -38,6 +38,14 @@ class User(Base):
     # Open Quotation Tracker page — the branch-wise service quotation vs invoicing
     # summary. Master Admin always sees it; everyone else needs this flag.
     can_access_quotation_tracker = Column(Boolean, default=False)
+    # Data Upload page (Engagement Masters). Master Admin always has it; a
+    # branch admin / employee needs this flag, granted from Profile.
+    can_access_import = Column(Boolean, default=False)
+    # WHICH files that user may upload there: JSON list of file-type names
+    # (the FILE_TYPES registry in app/routes/import_routes.py). NULL = every
+    # file; [] = none. Only read when can_access_import is on — the Master
+    # Admin is never scoped by it.
+    import_files = Column(String(2000), nullable=True)
     # WHICH report pages inside PMS: JSON list of page keys. NULL = every page
     # (how it worked before per-page rights). AOP & Master is NOT in here — it
     # has its own aop_access / aop_tabs rights below.

@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx';
 import { warmKey, readWarmCache, writeWarmCache } from '../utils/warmCache';
 import { reflowLetterReferencesHtml } from '../utils/letterReferences';
 import { letterBodyTopMm, normalizeLetterBodyHtml } from '../utils/letterLayout';
+import { flattenListMarkers } from '../utils/letterPdfMarkers';
 import { dateOnly, finishDateColumns } from '../utils/excelDateColumns';
 
 const themeColor = '#2f3192';
@@ -335,6 +336,9 @@ const generateBandedLetterPdf = async (bodyHtml) => {
         '</style>' +
         bodyHtml;
     document.body.appendChild(holder);
+    // html2canvas draws a list's ::marker tiny and above the line —
+    // write the bullets/numbers in as real text first
+    flattenListMarkers(holder);
 
     // Strip presentational attributes that force top-alignment / fixed heights.
     // Letter table templates often use <th valign="top"> and <tr height="40">.

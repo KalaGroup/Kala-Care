@@ -87,6 +87,10 @@ const shortBranch = (b) => String(b || '').replace(/^KALA\s*Care\s*Global\s*LLP\
 const num2 = (v) => (Number.isFinite(v) ? v : 0).toFixed(2);
 const num1 = (v) => (Number.isFinite(v) ? v : 0).toFixed(1);
 const fmtAmt = (v) => Math.round(v).toLocaleString('en-IN');
+// 'YYYY-MM' -> 'July 2026', for the HR attendance column's tooltip.
+const fmtMonth = (m) => (m
+  ? new Date(`${m}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+  : '');
 
 // Calendar weeks (Mon–Sun) clipped to the period; the first and last may be
 // partial. Same split as the prototype.
@@ -240,7 +244,9 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     const { branches = [], branch_regions: regions = [], employees = [],
       heads = [], lead_categories: cats = [], efsr_heads: eheads = [],
       sr_records: srRec = [], lead_records: ldRec = [], conv_records: cvRec = [],
-      other_conv_records: ocRec = [], present_records: prRec = [],
+      other_conv_records: ocRec = [], cross_records: xRec = [],
+      attendance_records: atRec = [], attendance_months: atMonths = [],
+      present_records: prRec = [],
       allocate_records: alRec = [], cdi_records: cdiRec = [],
       working_days: wdMaster = {} } = data;
 
@@ -266,11 +272,31 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     // ---- working days of the SELECTED days, per region --------------------
     // Each touched month contributes its master value, prorated by how many of
     // its days are actually selected.
+    //
+    // ONE THING IS EXCLUDED that used to be counted: DAYS THE DATA HAS NOT
+    // REACHED. The master's figure is the whole month's AVAILABLE man-days,
+    // and the files stop on the 24th of August — six of them have not been
+    // reported on by anything. Widening the period to the 31st divided the same
+    // work by a full month of man-days and reported every engineer low, which
+    // also made the rate depend on how far past the data the reader happened to
+    // drag the picker. It changes nothing for the DEFAULT period, which already
+    // ends at max_date.
+    //
+    // on() is belt and braces: buildWeeks() already clips the first and last
+    // week to the period, so no day outside it reaches here — but the record
+    // counts above all go through on(), and a man-day figure has no business
+    // trusting a different rule from the volumes it divides.
+    //
+    // The same rule is in sePerformanceModel's workDaysOf(), because SE
+    // Performance must quote the same productivity for the same engineer.
+    // CHANGE BOTH OR NEITHER.
+    const dataEnd = data?.meta?.max_date || end;
     const monthSel = {};                       // 'YYYY-MM' -> selected day count
     weeks.forEach((w) => {
       if (weekSel.size && !weekSel.has(w.n)) return;
       for (let i = 0; i < w.days; i++) {
         const ds = addDays(w.start, i);
+        if (!on(ds) || ds > dataEnd) continue;
         const key = ds.slice(0, 7);
         monthSel[key] = (monthSel[key] || 0) + 1;
       }
@@ -296,8 +322,29 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       weekly: new Array(weeks.length).fill(0), days: new Set(),
       leads: 0, cats: new Array(cats.length).fill(0),
       spare: 0, labour: 0,
+      hr: 0,                       // HR attendance days, this month only
     });
     const emp = employees.map(blank);
+
+    /* HR attendance is a WHOLE-month figure, so it is only offered when the
+       period IS exactly one uploaded calendar month — 01 Jul to 31 Jul and
+       nothing else. A part month would divide that month's work by a full
+       month of attendance and read low. null = not available for this period. */
+    const hrMonth = (() => {
+      if (!start || !end) return null;
+      const m = start.slice(0, 7);
+      if (end.slice(0, 7) !== m || start.slice(8) !== '01') return null;
+      const last = new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0).getDate();
+      if (Number(end.slice(8)) !== last) return null;
+      return atMonths.includes(m) ? m : null;
+    })();
+    if (hrMonth) {
+      atRec.forEach(([ei, m, d]) => {
+        if (m !== hrMonth) return;
+        const e = emp[ei];
+        if (e) e.hr += d;
+      });
+    }
 
     srRec.forEach(([ei, ds, hi, n]) => {
       if (!on(ds)) return;
@@ -348,6 +395,22 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     // 'Other' — the conversions of leads with NO Service Engineer, keyed on the
     // BRANCH, so they never enter the engineer roster (which would corrupt every
     // branch's SE headcount and working days). Own columns, branch rows only.
+    // ---- 'MH Other' / 'KA Other' — SRs an engineer closed in someone else's
+    // branch. Held per BRANCH like otherBr, never as an engineer: the whole
+    // point is that this work carries NO working days into any branch.
+    const crossBr = branches.map(() => ({
+      sr: 0, heads: new Array(heads.length).fill(0),
+      weekly: new Array(weeks.length).fill(0),
+    }));
+    xRec.forEach(([bi, ds, hi, n]) => {
+      if (!on(ds)) return;
+      const c = crossBr[bi];
+      if (!c) return;
+      c.sr += n;
+      c.heads[hi] = (c.heads[hi] || 0) + n;
+      c.weekly[weekOf(ds)] += n;
+    });
+
     const otherBr = branches.map(() => ({ spare: 0, labour: 0 }));
     ocRec.forEach(([bi, ds, spare, labour]) => {
       if (!on(ds)) return;
@@ -357,10 +420,18 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       o.labour += labour || 0;
     });
 
-    // A row is shown only when the engineer did something in the selection.
-    const active = emp.map((e) => e.sr > 0 || e.alloc > 0 || e.leads > 0
-      || e.days.size > 0 || e.spare > 0 || e.labour > 0
-      || e.cdi[0] > 0 || e.cdi[1] > 0 || e.cdi[2] > 0);
+    // A row is shown only when the engineer did something in the selection —
+    // AND he was still employed in it. An engineer whose last working day falls
+    // BEFORE the period start is off the roster for that period: he is nobody's
+    // headcount, so his working days must not sit in a branch's denominator.
+    // Only a last day that is actually KNOWN can hide anyone (see _left_dates).
+    const active = emp.map((e, ei) => {
+      const left = employees[ei]?.left;
+      if (left && left < start) return false;
+      return e.sr > 0 || e.alloc > 0 || e.leads > 0
+        || e.days.size > 0 || e.spare > 0 || e.labour > 0
+        || e.cdi[0] > 0 || e.cdi[1] > 0 || e.cdi[2] > 0;
+    });
 
     // Working days are a per-engineer figure; branch/group/grand rows sum them
     // (available man-days), the same way Days Present sums.
@@ -372,7 +443,7 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       employees[a].n.localeCompare(employees[b].n)));
 
     return { weeks, weekOf, heads, cats, eheads, emp, active, byBranch, workOf,
-      wdByRegion, otherBr };
+      wdByRegion, otherBr, crossBr, hrMonth };
   }, [data, start, end, weekSel]);
 
   if (loading) {
@@ -401,7 +472,8 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
   }
 
   const { meta, branches, employees, groups = [] } = data;
-  const { weeks, heads, cats, eheads, emp, byBranch, workOf, otherBr } = agg;
+  const { weeks, heads, cats, eheads, emp, byBranch, workOf, otherBr,
+    crossBr, hrMonth } = agg;
   // Only the ticked weeks get a column; each keeps `i`, its index into the
   // per-week totals, so dropping columns never shifts the data.
   const shownWeeks = weeks
@@ -421,7 +493,11 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     }
     return list;
   };
-  const hasOther = (bi) => otherBr[bi].spare > 0 || otherBr[bi].labour > 0;
+  // A branch row that has to print even with no engineer under it: the
+  // unattributed conversion money, and — on the two 'Other' rows — the SRs an
+  // engineer closed outside his own branch.
+  const hasOther = (bi) => otherBr[bi].spare > 0 || otherBr[bi].labour > 0
+    || crossBr[bi].sr > 0;
   // A branch whose only figure in the period is unattributed money still has to
   // show, or the Grand Total would not add up to the rows above it. Skipped
   // while an SE filter / search is on: those narrow to named engineers, and an
@@ -433,7 +509,7 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
   const zero = () => ({
     alloc: 0, eheads: new Array(eheads.length).fill(0), cdi: [0, 0, 0],
     sr: 0, heads: new Array(heads.length).fill(0),
-    weekly: new Array(weeks.length).fill(0), present: 0, work: 0,
+    weekly: new Array(weeks.length).fill(0), present: 0, work: 0, hr: 0,
     leads: 0, cats: new Array(cats.length).fill(0), spare: 0, labour: 0,
     // Unattributed (no-SE) conversion money — a BRANCH figure, so it is added
     // by the branch roll-ups below and stays 0 on every engineer row.
@@ -442,6 +518,13 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
   const addBranchOther = (t, bi) => {
     t.oSpare += otherBr[bi].spare;
     t.oLabour += otherBr[bi].labour;
+    // Cross-branch SRs ride on the BRANCH, never on an engineer, so they reach
+    // the branch / region / Grand totals here and bring no working days with
+    // them. On a real branch every one of these is 0.
+    const c = crossBr[bi];
+    t.sr += c.sr;
+    c.heads.forEach((v, i) => { t.heads[i] += v; });
+    c.weekly.forEach((v, i) => { t.weekly[i] += v; });
     return t;
   };
   const addSE = (t, ei) => {
@@ -450,7 +533,7 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     t.leads += e.leads; t.spare += e.spare; t.labour += e.labour;
     e.eheads.forEach((v, i) => { t.eheads[i] += v; });
     e.cdi.forEach((v, i) => { t.cdi[i] += v; });
-    t.present += e.days.size; t.work += workOf(ei);
+    t.present += e.days.size; t.work += workOf(ei); t.hr += e.hr;
     e.heads.forEach((v, i) => { t.heads[i] += v; });
     e.cats.forEach((v, i) => { t.cats[i] += v; });
     e.weekly.forEach((v, i) => { t.weekly[i] += v; });
@@ -484,6 +567,13 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
   // ---- cells ---------------------------------------------------------------
   // Zero placeholder: a plain dash that inherits the cell colour, so it is
   // black on normal rows and white on the dark Grand Total row.
+  // Productivity is FIXED to Working Days. HR attendance and Days present are
+  // shown beside it as information, but the figure the business compares
+  // branches on has one definition and does not move with a dropdown.
+  // Divided by the ROUNDED working days, so a reader checking the arithmetic by
+  // hand gets the printed number back instead of one off by the proration.
+  const prDenom = (t) => Math.round(t.work);
+
   const Z = <span>-</span>;
   const numCell = (v) => (v ? v.toLocaleString('en-IN') : Z);
   const amtCell = (v) => (v ? fmtAmt(v) : Z);
@@ -538,20 +628,29 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     } else {
       cells.push(<td key={`${key}-hx`} className={cls} style={foldCol} />);
     }
+    // The three per-engineer day columns travel together behind one toggle, in
+    // the order the business reads them: the man-days the master ALLOWS, then
+    // what HR says he was there for, then the days the service files show him
+    // finishing a job on.
     if (showWD) {
       cells.push(<td key={`${key}-wd`} className={cls}>
         {perSE && t.work ? Math.round(t.work).toLocaleString('en-IN') : Z}</td>);
+      if (hrMonth) {
+        cells.push(<td key={`${key}-hr`} className={cls}>
+          {perSE && t.hr ? num2(t.hr).replace(/\.00$/, '') : Z}</td>);
+      }
+      cells.push(<td key={`${key}-dp`} className={cls}>{perSE ? numCell(t.present) : Z}</td>);
     }
-    cells.push(<td key={`${key}-dp`} className={cls}>{perSE ? numCell(t.present) : Z}</td>);
     // Productivity is Close SR / WORKING DAYS (the available man-days), not
     // / Days Present, and it prints on EVERY row — a roll-up still divides by
     // the man-days of its engineers even though the column above it is blank.
     // Divided by the ROUNDED working days, so on an engineer row a reader
     // checking the arithmetic by hand gets the printed number back instead of
     // one off by the proration remainder.
+    const denom = prDenom(t);
     cells.push(
       <td key={`${key}-pr`} className={`${cls} font-semibold`}>
-        {Math.round(t.work) > 0 ? num2(t.sr / Math.round(t.work)) : Z}
+        {denom > 0 ? num2(t.sr / denom) : Z}
       </td>);
     // CDI: Passive / Detractor / % — (P - D) over ALL feedback, incl. Passive.
     // The split shows PASSIVE (cdi[2]), not Promotor (cdi[0]): Promotor is the
@@ -765,17 +864,26 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
     };
 
     g.forEach((bi) => {
-      const bOpen = openBranches.has(bi);
+      // 'MH Other' / 'KA Other': a branch row with no engineers under it, holding
+      // the SRs its region's engineers closed outside their own branch. There is
+      // nothing to expand, so the cell opens the RECORDS instead.
+      const isOtherBr = String(data.branch_ids[bi] || '').startsWith('OTHER_');
+      const bOpen = openBranches.has(bi) && !isOtherBr;
       const ses = seOf(bi);
       const bTot = sumBranch(bi);
-      const seLabel = `${ses.length} SE${ses.length > 1 ? 's' : ''}`;
+      const seLabel = isOtherBr ? 'click for records'
+        : `${ses.length} SE${ses.length > 1 ? 's' : ''}`;
 
       if (!bOpen) {
         const bg = bandBg();
         rows.push(
           <tr key={`b${bi}`} style={{ background: bg }}>
             {gcell(`b${bi}c`)}
-            {branchCell(bi, shortBranch(branches[bi]), seLabel, 1, false, () => toggleBranch(bi), bg)}
+            {branchCell(bi, shortBranch(branches[bi]), seLabel, 1, false,
+              isOtherBr
+                ? () => setSeDetail({ other: true, name: branches[bi],
+                  region: data.branch_regions[bi] })
+                : () => toggleBranch(bi), bg)}
             {pinLabel('Branch Total', `b${bi}`, bg)}
             {dataCells(bTot, `b${bi}`)}
           </tr>
@@ -847,8 +955,16 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
   // bottom, immediately above the Grand Total. Read off branch_regions, so a new
   // branch lands in its own region's total without touching this file.
   const regionAt = (gi) => regionOf(visibleGroups[gi][0]);
+  // A user scoped to their own branches (every non-HO Branch Admin / Employee —
+  // the backend flags their payload `branch_scoped`) gets NO region row: an
+  // 'MH Total' over one or two of MH's branches is not the region's total, it
+  // is their own Grand Total wearing the region's name. Left empty, the two
+  // `lastOfRegion[...] === gi` gates below never fire, on screen or in the
+  // Excel export.
   const lastOfRegion = {};
-  visibleGroups.forEach((g, gi) => { lastOfRegion[regionAt(gi)] = gi; });
+  if (!data.branch_scoped) {
+    visibleGroups.forEach((g, gi) => { lastOfRegion[regionAt(gi)] = gi; });
+  }
   const regionRow = (rg) => {
     const list = allVisible.filter((bi) => regionOf(bi) === rg);
     if (!list.length) return null;
@@ -882,7 +998,8 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
   const colCount = 1 + 1 + (seOpen ? 2 : 0)
     + (SHOW_ALLOC ? 1 + (openAlloc ? eheads.length : 1) : 0)
     + 1 + (showWeeks ? shownWeeks.length : 0)
-    + (openSR ? heads.length : 1) + (showWD ? 1 : 0) + 2
+    + (openSR ? heads.length : 1)
+    + (showWD ? (hrMonth ? 3 : 2) : 0) + 1
     + (openCDI ? 3 : 1) + 3 + (openLead ? cats.length : 1);
 
   // ---- header --------------------------------------------------------------
@@ -1001,7 +1118,12 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       // folded band already exports as no columns at all.
       const nAL = SHOW_ALLOC ? 1 : 0;
       const xEHeads = SHOW_ALLOC && openAlloc ? eheads : [];
-      const nWD = showWD ? 1 : 0;             // the toolbar's Working Days toggle
+      // The toolbar's day-columns toggle. HR attendance only exists for a
+      // period that is exactly one uploaded month, so it is 3 columns then and
+      // 2 otherwise — the export mirrors the screen exactly.
+      const nHR = showWD && hrMonth ? 1 : 0;
+      const nWD = showWD ? 1 : 0;
+      const nDP = showWD ? 1 : 0;
       // folded CDI still exports its % column — the same thing the screen keeps
       const nCDI = openCDI ? 3 : 1;
       const C_CPCT_OFF = openCDI ? 2 : 0;     // where % sits inside the band
@@ -1013,7 +1135,8 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       const nWk = showWeeks ? shownWeeks.length : 0;
       const C_HEAD = C_WK + nWk;
       const C_WD = C_HEAD + xHeads.length;
-      const C_DP = C_WD + nWD, C_PR = C_DP + 1;
+      const C_HR = C_WD + nWD;
+      const C_DP = C_HR + nHR, C_PR = C_DP + nDP;
       const C_CDI = C_PR + 1;                 // Passive / Detractor / %
       const C_LD = C_CDI + nCDI;
       const C_CAT = C_LD + 1;
@@ -1077,7 +1200,8 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       band2(C_HEAD, xHeads.length, 'SR Type (Closed)');
       xHeads.forEach((h, k) => put(3, C_HEAD + k, h, HD));
       if (nWD) tall(C_WD, 'Working Days');
-      tall(C_DP, 'Days present\non Task end');
+      if (nHR) tall(C_HR, 'HR wise\nattendance');
+      if (nDP) tall(C_DP, 'Days present\non Task end');
       // the derived column carries its formula in the title, as on screen
       tall(C_PR, 'Productivity\n(Close SR ÷ Working Days)');
       if (openCDI) {
@@ -1114,11 +1238,12 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
         });
         xHeads.forEach((h, k) => put(r, C_HEAD + k, N(t.heads[k]), { ...o, align: CENTER, fmt: F_CNT }));
         if (nWD) put(r, C_WD, perSE ? N(Math.round(t.work)) : '', { ...o, align: CENTER, fmt: F_CNT });
-        put(r, C_DP, perSE ? N(t.present) : '', { ...o, align: CENTER, fmt: F_CNT });
+        if (nHR) put(r, C_HR, perSE && t.hr ? t.hr : '', { ...o, align: CENTER, fmt: F_CNT });
+        if (nDP) put(r, C_DP, perSE ? N(t.present) : '', { ...o, align: CENTER, fmt: F_CNT });
         // The SAME divisor as the screen: the ROUNDED working days, so the
         // sheet's Productivity ties up with its own Working Days column instead
         // of carrying the proration remainder.
-        put(r, C_PR, Math.round(t.work) > 0 ? +(t.sr / Math.round(t.work)).toFixed(2) : 0,
+        put(r, C_PR, prDenom(t) > 0 ? +(t.sr / prDenom(t)).toFixed(2) : 0,
           { ...o, align: CENTER, fmt: F_PR, font: { ...(o.font || {}), bold: true } });
         const cdiAll = t.cdi[0] + t.cdi[1] + t.cdi[2];
         if (openCDI) {
@@ -1316,19 +1441,20 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
               items={weeks.map((w) => ({ v: w.n, t: w.label, sub: w.range }))} />
           )}
 
-          {/* Working Days is a COLUMN toggle, not a filter: it hides the column on
-              screen and in the export and changes nothing else. Productivity keeps
-              dividing by Working Days either way, so the button never moves a
-              number — which is why it does not re-minimize the tree the way the
-              filter-bar controls above do. */}
+          {/* A COLUMN toggle, not a filter: it hides the three per-engineer DAY
+              columns — Working Days, HR wise attendance (only for an uploaded
+              month) and Days present — on screen and in the export, and changes
+              nothing else. Productivity keeps dividing by whichever of them its
+              own header names, so the button never moves a number — which is why
+              it does not re-minimize the tree the way the filters above do. */}
           <button onClick={() => setShowWD(!showWD)}
-            title={showWD ? 'Hide the Working Days column (screen and export)'
-              : 'Show the Working Days column'}
+            title={showWD ? 'Hide the day columns (screen and export)'
+              : 'Show the day columns — Working Days, HR attendance, Days present'}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
               showWD ? 'text-white border-[#2f3192]' : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'}`}
             style={showWD ? { backgroundColor: THEME } : {}}>
             <span className={`text-[8px] transition-transform ${showWD ? 'rotate-90' : ''}`}>▶</span>
-            Working Days
+            Day columns
           </button>
 
           <MultiSelect label="Branch" selected={brSel} onChange={(s) => { setBrSel(s); setSeSel(new Set()); }}
@@ -1424,12 +1550,27 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
                   {showWD && (
                     <th rowSpan={2} style={HB} className={thBase}>Working<br />Days</th>
                   )}
-                  <th rowSpan={2} className={`${thBase} !whitespace-normal`}
-                    style={{ width: 78, minWidth: 78, maxWidth: 78, ...HB }}
-                    title="Distinct SR TASK END DATEs — the days the engineer finished a job in the field">
-                    Days present<br />on Task end
-                  </th>
-                  {/* the derived column carries its formula in the title */}
+                  {showWD && hrMonth && (
+                    <th rowSpan={2} className={`${thBase} !whitespace-normal`}
+                      style={{ width: 78, minWidth: 78, maxWidth: 78, ...HB }}
+                      title={`HR's own days worked in ${fmtMonth(hrMonth)}, off the attendance file `
+                        + 'uploaded on the SE UID Master (Profile). Present and Out Door Duty count a day each '
+                        + 'and a Half Day counts half; leave, absent, weekly off, C off and holidays count '
+                        + 'nothing. A whole-month figure, so the column appears only while the period is '
+                        + 'exactly one uploaded calendar month — a dash is an engineer HR’s file does not list.'}>
+                      HR wise<br />attendance
+                    </th>
+                  )}
+                  {showWD && (
+                    <th rowSpan={2} className={`${thBase} !whitespace-normal`}
+                      style={{ width: 78, minWidth: 78, maxWidth: 78, ...HB }}
+                      title="Distinct SR TASK END DATEs — the days the engineer finished a job in the field">
+                      Days present<br />on Task end
+                    </th>
+                  )}
+                  {/* The derived column names its own divisor, and lets it be
+                      changed — the three day columns measure different things
+                      and the business reads productivity against each of them. */}
                   <th rowSpan={2} className={`${thBase} !whitespace-normal`}
                     style={{ width: 78, minWidth: 78, maxWidth: 78, ...HB }}>
                     Product-<br />ivity
@@ -1561,7 +1702,8 @@ const EmployeeProductivityReport = ({ periodFrom, periodTo, preloaded }) => {
       {/* The engineer's own Close SR records — opened from the SE name, bounded
           by the SAME period the table is showing so the count matches the row. */}
       {seDetail && (
-        <SEDetailModal mode="ep" name={seDetail.name} uid={seDetail.uid}
+        <SEDetailModal mode={seDetail.other ? 'ep-other' : 'ep'}
+          name={seDetail.name} uid={seDetail.uid} region={seDetail.region}
           branch={seDetail.branch} branchId={seDetail.branchId}
           from={start} to={end} onClose={() => setSeDetail(null)} />
       )}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
+import { openInNewTab } from '../utils/openInNewTab';
 import toast from 'react-hot-toast';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -6,8 +7,15 @@ import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { canExportExcel } from '../utils/exportPermission';
+import { SHOW_SERVICE_CYCLE } from '../utils/letterFeatures';
+import ModelWiseAttachments from '../components/ModelWiseAttachments';
+import LetterParaEditor from '../components/LetterParaEditor';
+import LetterFormatPreview from '../components/LetterFormatPreview';
+import { isFieldEditable, toggleFieldEditable, lockedCount } from '../utils/letterFieldLocks';
 import {
   MegaphoneIcon,
+  LockClosedIcon,
+  LockOpenIcon,
   PlusIcon,
   XMarkIcon,
   FunnelIcon,
@@ -303,15 +311,77 @@ const Campaign = () => {
   const [selectedTransferStatuses, setSelectedTransferStatuses] = useState(ALL_TRANSFER_STATUS_VALUES);
 
   // ==================== Letter Master states ====================
+  // The Letter Master holds TWO things now: the per-format types it always
+  // had, and the engine-model -> attachment master, which is SHARED with the
+  // Welcome Letter (same tables, same endpoints) rather than being per format.
+  const [letterMasterTab, setLetterMasterTab] = useState('formats');   // formats | models
   const LETTER_ATTACHMENT_EXTS = ['mp4', 'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xlsx', 'xls', 'csv'];
 
   const [showLetterMaster, setShowLetterMaster] = useState(false);
   const [showLetterFormatForm, setShowLetterFormatForm] = useState(false);
+  // Product multi-select dropdown (letter format form) — open/close + outside click
+  const [productDropOpen, setProductDropOpen] = useState(false);
+  const productDropRef = useRef(null);
+  useEffect(() => {
+    const close = (e) => {
+      if (productDropRef.current && !productDropRef.current.contains(e.target)) setProductDropOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
   const [showLetterFormatView, setShowLetterFormatView] = useState(false);
   const [letterFormats, setLetterFormats] = useState([]);
   const [letterFormatsLoading, setLetterFormatsLoading] = useState(false);
   const [letterFormatSaving, setLetterFormatSaving] = useState(false);
   const [viewingLetterFormat, setViewingLetterFormat] = useState(null);
+  // View opens on the LETTER, not on the field list — the details are a tab
+  const [letterViewTab, setLetterViewTab] = useState('letter');   // letter | attachments
+  // the shared engine-model master, loaded only when a format actually uses it
+  const [viewModelAtts, setViewModelAtts] = useState(null);
+  const [viewModelAttsLoading, setViewModelAttsLoading] = useState(false);
+
+  /* Open one of the format's own attachments. They live as base64 on the
+     format row, so this becomes a blob URL rather than a server round trip. */
+  const openFormatAttachment = (att) => {
+    if (!att?.content) { toast('Still loading this file…'); return; }
+    try {
+      const bin = atob(att.content);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+      const type = att.type
+        || (String(att.name || '').toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+      const url = URL.createObjectURL(new Blob([bytes], { type }));
+      openInNewTab(url);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch { toast.error('Could not open this file'); }
+  };
+
+  /* A model-wise file lives in the shared master, so it is fetched by id. */
+  const openModelAttachment = async (id, name) => {
+    try {
+      const u = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/welcome-letter/master/files/${id}`,
+        { headers: { 'user-id': String(u.user_id || ''), 'user-role': u.role || '' } });
+      if (!res.ok) throw new Error('File not available');
+      const url = URL.createObjectURL(await res.blob());
+      openInNewTab(url);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) { toast.error(e.message || `Could not open ${name}`); }
+  };
+
+  /* Only a format with use_model_attachments on ever carries these, so the
+     shared master is fetched on demand rather than with every View. */
+  const loadViewModelAttachments = async () => {
+    setViewModelAttsLoading(true);
+    try {
+      const u = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/welcome-letter/master`,
+        { headers: { 'user-id': String(u.user_id || ''), 'user-role': u.role || '' } });
+      const d = await res.json();
+      setViewModelAtts(res.ok ? (d.model_attachments || []) : []);
+    } catch { setViewModelAtts([]); }
+    finally { setViewModelAttsLoading(false); }
+  };
   // True while the full format (incl. heavy attachment content) is being fetched
   // on demand for view/edit. The list endpoint returns attachment metadata only,
   // so we hydrate the actual base64 content lazily when a format is opened.
@@ -368,8 +438,12 @@ const Campaign = () => {
     reference_no: '',
     expiry_date: '',
     default_attachments: [],
+    subject: '',
     start_para: '',
     end_para: '',
+    signature_para: '',
+    editable_fields: {},
+    use_model_attachments: false,
     // CSP-only Service Cycle defaults
     include_service_cycle: false,
     service_cycle_intro: DEFAULT_SERVICE_CYCLE_INTRO,
@@ -1949,8 +2023,12 @@ const Campaign = () => {
       customer_detail_fields: ['instance_id'],
       engagement_detail_fields: [],
       default_attachments: [],
+      subject: '',
       start_para: '',
       end_para: '',
+      signature_para: '',
+      editable_fields: {},
+      use_model_attachments: false,
       include_service_cycle: false,
       service_cycle_intro: DEFAULT_SERVICE_CYCLE_INTRO,
       service_cycle_rows: []
@@ -1980,12 +2058,12 @@ const Campaign = () => {
   };
 
   const openEditLetterFormat = (fmt) => {
-    const product = (fmt.products || [])[0] || '';
+    const products = (fmt.products || []).filter(p => (p || '').trim());
     setLetterFormatData({
       id: fmt.id,
       format_type_name: fmt.format_type_name || '',
-      products: product ? [product] : [],
-      reference_no: fmt.reference_no || buildReferenceNo(product, fmt.id),
+      products,
+      reference_no: fmt.reference_no || buildReferenceNo(products, fmt.id),
       serial_start: fmt.serial_start || '1',
       expiry_date: fmt.expiry_date ? fmt.expiry_date.split('T')[0] : '',
       _originalExpiry: fmt.expiry_date ? fmt.expiry_date.split('T')[0] : '',
@@ -1994,8 +2072,14 @@ const Campaign = () => {
       engagement_detail_fields: fmt.engagement_detail_fields || [],
       // Metadata-only for instant open; real content is hydrated just below.
       default_attachments: fmt.default_attachments || [],
+      // the subject used to BE the format name — fall back for older formats
+      subject: fmt.subject || fmt.format_type_name || '',
       start_para: fmt.start_para || '',
       end_para: fmt.end_para || '',
+      signature_para: fmt.signature_para || '',
+      editable_fields: fmt.editable_fields && typeof fmt.editable_fields === 'object'
+        ? fmt.editable_fields : {},
+      use_model_attachments: !!fmt.use_model_attachments,
       // CSP-only Service Cycle defaults
       include_service_cycle: !!fmt.include_service_cycle,
       service_cycle_intro: fmt.service_cycle_intro || DEFAULT_SERVICE_CYCLE_INTRO,
@@ -2049,6 +2133,8 @@ const Campaign = () => {
 
   const openViewLetterFormat = (fmt) => {
     setViewingLetterFormat(fmt);
+    setLetterViewTab('letter');      // always open on the letter itself
+    setViewModelAtts(null);          // re-read the shared master next time it is asked for
     setShowLetterFormatView(true);
 
     // Attachment download links need the base64 content, which the list omits —
@@ -2068,38 +2154,65 @@ const Campaign = () => {
     }
   };
 
-  // Reference No: KCGL/<FY>/<product>[-N]/BranchCode/serial no
-  // N = how many OTHER letter formats already use this same product. So the
-  // first format with a product stays plain ("Battery"), the next becomes
-  // "Battery-1", the one after "Battery-2", and so on. The format currently
-  // being edited is excluded from the count via editingId.
-  // "BranchCode" and "serial no" remain literal words, filled per customer
-  // when the letter is actually generated.
-  const buildReferenceNo = (product, editingId = null) => {
-    if (!product) return '';
+  // Reference No: KCGL/<FY>/<products>[-N]/BranchCode/serial no
+  // The product part joins every selected product ("Battery,Oil"), spaces
+  // removed per product ("Oil Change" -> "OilChange"; the stored names keep
+  // their spaces). N = how many OTHER letter formats already share ANY of the
+  // selected products, so the first stays plain, the next becomes -1, then
+  // -2, and so on. The format currently being edited is excluded via
+  // editingId. "BranchCode" and "serial no" remain literal words, filled per
+  // customer when the letter is actually generated.
+  const buildReferenceNo = (products, editingId = null) => {
+    const list = (Array.isArray(products) ? products : [products])
+      .filter(p => (p || '').trim());
+    if (!list.length) return '';
     const count = letterFormats.filter(
-      f => (f.products || []).includes(product) && f.id !== editingId
+      f => f.id !== editingId && (f.products || []).some(p => list.includes(p))
     ).length;
     const suffix = count > 0 ? `-${count}` : '';
-    // Remove spaces from the product name in the reference number only,
-    // e.g. "Oil Change" -> "OilChange". The stored product name keeps its spaces.
-    const productPart = product.replace(/\s+/g, '');
+    const productPart = list.map(p => p.replace(/\s+/g, '')).join(',');
     return `KCGL/${getFinancialYear()}/${productPart}${suffix}/Branch_Code/Serial_No`;
   };
 
-  // Only ONE product per letter format. Selecting a product (or "Select
-  // Product" to clear) rebuilds the reference number.
-  const selectLetterProduct = (productName) => {
+  // A format can belong to SEVERAL products — the Send Letter wizard offers it
+  // to customers enrolled in a drive of ANY of them. Toggling a product
+  // rebuilds the reference number from the full selection.
+  const toggleLetterProduct = (productName) => {
     setLetterFormatData(prev => {
-      const csp = isCspService(productName);
+      const cur = prev.products || [];
+      const products = cur.includes(productName)
+        ? cur.filter(p => p !== productName)
+        : [...cur, productName];
+      const anyCsp = products.some(isCspService);
       return {
         ...prev,
-        products: productName ? [productName] : [],
-        reference_no: buildReferenceNo(productName, prev.id),
-        // Leaving CSP -> switch Service Cycle off so a non-CSP format never carries it
-        include_service_cycle: csp ? prev.include_service_cycle : false
+        products,
+        reference_no: buildReferenceNo(products, prev.id),
+        // No CSP product left -> switch Service Cycle off so a non-CSP format never carries it
+        include_service_cycle: anyCsp ? prev.include_service_cycle : false
       };
     });
+  };
+
+  /* The small lock under each box: may the sender still change this while
+     sending? Unset means yes, so an existing format is untouched. */
+  const FieldLock = ({ fieldKey }) => {
+    const on = isFieldEditable(letterFormatData, fieldKey);
+    return (
+      <button type="button" disabled={letterFormatSaving}
+        onClick={() => setLetterFormatData((p) => ({
+          ...p, editable_fields: toggleFieldEditable(p.editable_fields, fieldKey),
+        }))}
+        title={on
+          ? 'The sender can change this while sending — click to lock it'
+          : 'Locked: the sender sees this but cannot change it — click to unlock'}
+        className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold transition
+          ${on ? 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'
+            : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>
+        {on ? <LockOpenIcon className="h-3 w-3" /> : <LockClosedIcon className="h-3 w-3" />}
+        {on ? 'Editable while sending' : 'Locked'}
+      </button>
+    );
   };
 
   // ----- CSP-only Service Cycle row editing (Letter Master defaults) -----
@@ -2222,6 +2335,12 @@ const Campaign = () => {
       toast.error('Format Type Name is required');
       return;
     }
+    // the reference number is built from the product, so a format without one
+    // cannot produce a valid Ref No
+    if (!(letterFormatData.products || []).some((p) => (p || '').trim())) {
+      toast.error('Product is required');
+      return;
+    }
 
     // Block past expiry dates — but allow an already-saved past date to remain
     // untouched (e.g. a format that was set to a future date and has since expired,
@@ -2240,8 +2359,9 @@ const Campaign = () => {
     const saveToast = toast.loading(isEdit ? 'Updating format...' : 'Saving format...');
 
     try {
-      const product = letterFormatData.products[0] || '';
-      const isCsp = isCspService(product);
+      const products = (letterFormatData.products || []).filter(p => (p || '').trim());
+      // Service Cycle applies while ANY selected product is CSP.
+      const isCsp = products.some(isCspService);
       // Keep only non-blank rows, and only for a CSP product with the toggle on.
       const cleanServiceCycleRows = (isCsp && letterFormatData.include_service_cycle)
         ? (letterFormatData.service_cycle_rows || []).filter(r =>
@@ -2250,9 +2370,9 @@ const Campaign = () => {
         : [];
       const payload = {
         format_type_name: letterFormatData.format_type_name.trim(),
-        products: product ? [product] : [],
-        reference_no: product
-          ? (letterFormatData.reference_no || buildReferenceNo(product, letterFormatData.id))
+        products,
+        reference_no: products.length
+          ? (letterFormatData.reference_no || buildReferenceNo(products, letterFormatData.id))
           : '',
         serial_start: letterFormatData.serial_start || '1',
         expiry_date: letterFormatData.expiry_date || null,
@@ -2261,8 +2381,12 @@ const Campaign = () => {
         engagement_detail_fields: letterFormatData.engagement_detail_fields || [],
         default_recipients: uiRulesToDbRules(recipientRules),
         default_attachments: letterFormatData.default_attachments,
+        subject: (letterFormatData.subject || '').trim() || letterFormatData.format_type_name,
         start_para: letterFormatData.start_para || '',
         end_para: letterFormatData.end_para || '',
+        signature_para: letterFormatData.signature_para || '',
+        editable_fields: letterFormatData.editable_fields || {},
+        use_model_attachments: !!letterFormatData.use_model_attachments,
         // CSP-only Service Cycle defaults
         include_service_cycle: isCsp ? !!letterFormatData.include_service_cycle : false,
         service_cycle_intro: letterFormatData.service_cycle_intro || DEFAULT_SERVICE_CYCLE_INTRO,
@@ -4078,19 +4202,42 @@ const Campaign = () => {
             <div className="relative bg-white rounded-xl shadow-xl w-full lg:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
               <div className="sticky top-0 px-4 py-3 lg:px-5 lg:py-3.5 rounded-t-xl flex justify-between items-center z-10"
                 style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <DocumentTextIcon className="h-4 w-4 text-white" />
                   <h2 className="text-sm lg:text-base font-semibold text-white">Letter Master</h2>
                 </div>
+
+                {/* Format Types | Model-wise Attachments — in the header bar, so
+                    the modal keeps one band of chrome instead of two */}
+                <div className="ml-auto flex gap-0.5 rounded-lg bg-white/15 p-0.5 mr-2 overflow-x-auto">
+                  {[['formats', 'Format Types'], ['models', 'Model-wise Attachments']].map(([k, l]) => (
+                    <button key={k} type="button" onClick={() => setLetterMasterTab(k)}
+                      className="rounded-md px-3 py-1 text-[11.5px] font-semibold transition whitespace-nowrap"
+                      style={letterMasterTab === k
+                        ? { background: '#fff', color: themeColor }
+                        : { color: 'rgba(255,255,255,0.85)' }}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
                 <button
                   onClick={() => setShowLetterMaster(false)}
-                  className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100"
+                  className="w-7 h-7 shrink-0 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100"
                 >
                   <XMarkIcon className="h-4 w-4" />
                 </button>
               </div>
 
-              <div className="p-4 lg:p-5 overflow-y-auto custom-scrollbar">
+              {letterMasterTab === 'models' && (
+                <div className="overflow-y-auto custom-scrollbar">
+                  {/* The very same master the Welcome Letter edits — one
+                      component, one set of endpoints, one pair of tables. */}
+                  <ModelWiseAttachments />
+                </div>
+              )}
+
+              <div className={`p-4 lg:p-5 overflow-y-auto custom-scrollbar ${letterMasterTab === 'models' ? 'hidden' : ''}`}>
                 <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
                   <p className="text-xs text-gray-500">
                     {letterFormats.length} format{letterFormats.length !== 1 ? 's' : ''} saved
@@ -4469,10 +4616,11 @@ const Campaign = () => {
         {/* Add / Edit Letter Format Modal */}
         {showLetterFormatForm && (
           <div className="fixed inset-0 flex items-end lg:items-center justify-center z-[60] p-3">
-            <div
-              className="absolute inset-0 backdrop-blur-sm bg-black/30"
-              onClick={() => !letterFormatSaving && setShowLetterFormatForm(false)}
-            />
+            {/* NO onClick here on purpose: this form holds a whole letter
+                format — paragraphs, recipients, attachments — and a stray click
+                on the backdrop used to throw all of it away with no warning.
+                Closing is deliberate only: the ✕ or Cancel. */}
+            <div className="absolute inset-0 backdrop-blur-sm bg-black/30" />
             <div className="relative bg-white rounded-xl shadow-xl w-full lg:max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
               <div className="sticky top-0 px-4 py-3 lg:px-5 lg:py-3.5 rounded-t-xl flex justify-between items-center z-10"
                 style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
@@ -4487,23 +4635,46 @@ const Campaign = () => {
 
               <form onSubmit={handleSaveLetterFormat} className="p-4 lg:p-5 overflow-y-auto custom-scrollbar space-y-4">
 
-                {/* 1) Product — select first */}
+                {/* 1) Product — select first. One or MORE products: the format is
+                    offered when sending a letter to a customer enrolled in a
+                    drive of any selected product. */}
                 <div>
-                  <label className="block text-xs font-semibold text-black mb-1.5">Product</label>
-                  <select
-                    value={letterFormatData.products[0] || ''}
-                    onChange={(e) => selectLetterProduct(e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
-                    style={{ '--tw-ring-color': themeColor }}
-                    disabled={letterFormatSaving}
-                  >
-                    <option value="">Select Product</option>
-                    {services.map(service => (
-                      <option key={service.id} value={service.name}>{service.name}</option>
-                    ))}
-                  </select>
+                  <label className="block text-xs font-semibold text-black mb-1.5">Product(s) *</label>
+                  <div className="relative" ref={productDropRef}>
+                    <button
+                      type="button"
+                      onClick={() => setProductDropOpen(o => !o)}
+                      disabled={letterFormatSaving}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black flex items-center justify-between gap-2 disabled:opacity-50"
+                      style={{ '--tw-ring-color': themeColor }}
+                    >
+                      <span className={`truncate text-left ${letterFormatData.products.length ? '' : 'text-gray-400'}`}>
+                        {letterFormatData.products.length
+                          ? letterFormatData.products.join(', ')
+                          : 'Select Product(s)'}
+                      </span>
+                      <ChevronDownIcon className="h-4 w-4 flex-none text-gray-400" />
+                    </button>
+                    {productDropOpen && (
+                      <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-lg">
+                        {services.map(service => (
+                          <label key={service.id}
+                            className="flex cursor-pointer items-center gap-2 rounded px-2.5 py-1.5 text-sm text-black hover:bg-gray-50">
+                            <input type="checkbox" className="accent-indigo-700"
+                              checked={letterFormatData.products.includes(service.name)}
+                              onChange={() => toggleLetterProduct(service.name)}
+                              disabled={letterFormatSaving} />
+                            {service.name}
+                          </label>
+                        ))}
+                        {services.length === 0 && (
+                          <div className="px-2.5 py-2 text-xs text-gray-400">No products found</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <p className="text-[11px] text-gray-500 mt-1">
-                    Note: One product per letter format. If the same product is reused in another format, its reference number is numbered -1, -2, and so on.
+                    Note: Select one or more products — the letter is offered for customers enrolled in a drive of any selected product. If a product is reused in another format, the reference number is numbered -1, -2, and so on.
                   </p>
                 </div>
 
@@ -4597,6 +4768,29 @@ const Campaign = () => {
                     disabled={letterFormatSaving}
                     required
                   />
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Internal name for this format — the customer never sees it.
+                  </p>
+                </div>
+
+                {/* 3a) Subject of the letter — separate from the format name, so
+                    renaming a format no longer rewrites the subject its letters
+                    carry. */}
+                <div>
+                  <label className="block text-xs font-semibold text-black mb-1">Subject of Letter</label>
+                  <input
+                    type="text"
+                    value={letterFormatData.subject}
+                    onChange={(e) => setLetterFormatData({ ...letterFormatData, subject: e.target.value })}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black"
+                    style={{ '--tw-ring-color': themeColor }}
+                    placeholder="e.g., Preventive maintenance of your Kirloskar Genset"
+                    disabled={letterFormatSaving}
+                  />
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Printed as the letter&apos;s Subject line. Left blank, the format name is used.
+                  </p>
+                  <div className="mt-1 flex justify-end"><FieldLock fieldKey="subject" /></div>
                 </div>
 
                 {/* 3b) Expiry Date */}
@@ -4654,24 +4848,26 @@ const Campaign = () => {
                       );
                     })}
                   </div>
+                  <div className="mt-1 flex justify-end"><FieldLock fieldKey="customer_detail_fields" /></div>
                 </div>
 
                 {/* 5) Start Paragraph */}
                 <div>
                   <label className="block text-xs font-semibold text-black mb-1">Start Paragraph:</label>
-                  <textarea
+                  <LetterParaEditor
                     value={letterFormatData.start_para}
-                    onChange={(e) => setLetterFormatData({ ...letterFormatData, start_para: e.target.value })}
+                    onChange={(v) => setLetterFormatData({ ...letterFormatData, start_para: v })}
+                    disabled={letterFormatSaving}
+                    placeholder={"Opening paragraph..."}
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black leading-relaxed"
                     style={{ '--tw-ring-color': themeColor, minHeight: '150px' }}
-                    placeholder={"Opening paragraph..."}
-                    disabled={letterFormatSaving}
                   />
+                  <div className="mt-1 flex justify-end"><FieldLock fieldKey="start_para" /></div>
                 </div>
 
                 {/* 5b) CSP-only Service Cycle — shows ONLY when the selected product contains "csp".
                     Ships default Service Cycle rows used by the Send Letter wizard. */}
-                {isCspService(letterFormatData.products[0]) && (
+                {SHOW_SERVICE_CYCLE && (letterFormatData.products || []).some(isCspService) && (
                   <div className="border border-dashed border-gray-300 rounded-lg p-3 bg-gray-50 space-y-2">
                     <label className="flex items-center gap-2 text-xs font-semibold text-black cursor-pointer">
                       <input
@@ -4811,19 +5007,44 @@ const Campaign = () => {
                       </label>
                     ))}
                   </div>
+                  <div className="mt-1 flex justify-end"><FieldLock fieldKey="engagement_detail_fields" /></div>
                 </div>
 
                 {/* 7) End Paragraph */}
                 <div>
                   <label className="block text-xs font-semibold text-black mb-1">End Paragraph:</label>
-                  <textarea
+                  <LetterParaEditor
                     value={letterFormatData.end_para}
-                    onChange={(e) => setLetterFormatData({ ...letterFormatData, end_para: e.target.value })}
+                    onChange={(v) => setLetterFormatData({ ...letterFormatData, end_para: v })}
+                    disabled={letterFormatSaving}
+                    placeholder={"Closing paragraph..."}
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black leading-relaxed"
                     style={{ '--tw-ring-color': themeColor, minHeight: '150px' }}
-                    placeholder={"Closing paragraph..."}
-                    disabled={letterFormatSaving}
                   />
+                  <div className="mt-1 flex justify-end"><FieldLock fieldKey="end_para" /></div>
+                </div>
+
+                {/* 7b) The paragraph printed BELOW the signature block. */}
+                <div>
+                  <label className="block text-xs font-semibold text-black mb-1">
+                    Paragraph after signature{' '}
+                    <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <div className="mb-1 rounded-md border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-[11.5px] leading-[1.6] text-gray-500 whitespace-pre-wrap">
+                    {'Best regards,\nKALA Care Global LLP.,\n\nAuthorized Signatory'}
+                    <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                      ↓ your paragraph prints here
+                    </div>
+                  </div>
+                  <LetterParaEditor
+                    value={letterFormatData.signature_para}
+                    onChange={(v) => setLetterFormatData({ ...letterFormatData, signature_para: v })}
+                    disabled={letterFormatSaving}
+                    placeholder={"e.g., Note: This is a system generated letter..."}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 transition-all bg-white text-black leading-relaxed"
+                    style={{ '--tw-ring-color': themeColor, minHeight: '110px' }}
+                  />
+                  <div className="mt-1 flex justify-end"><FieldLock fieldKey="signature_para" /></div>
                 </div>
 
                 {/* 8) Default To/CC Recipients */}
@@ -5108,7 +5329,36 @@ const Campaign = () => {
                     <PaperClipIcon className="h-4 w-4" style={{ color: themeColor }} />
                     <span className="text-sm text-black">Attach files (optional)</span>
                   </label>
-                  <p className="text-[11px] text-gray-500 mt-1">mp4, jpg, png, pdf, word, excel — single, multiple or none.</p>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    mp4, jpg, png, pdf, word, excel — single, multiple or none. These go out with
+                    <b> every</b> letter of this format type.
+                  </p>
+
+                  {/* 9b) Opt this format in to the shared engine-model master.
+                      OFF by default — an existing format must not silently start
+                      sending a file it never sent before. */}
+                  <label className="mt-2.5 flex items-start gap-2 rounded-md border border-dashed p-2.5 cursor-pointer transition hover:bg-gray-50"
+                    style={{ borderColor: letterFormatData.use_model_attachments ? themeColor : '#d1d5db' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!letterFormatData.use_model_attachments}
+                      onChange={(e) => setLetterFormatData({ ...letterFormatData, use_model_attachments: e.target.checked })}
+                      disabled={letterFormatSaving}
+                      className="mt-0.5 rounded border-gray-300"
+                      style={{ accentColor: themeColor }}
+                    />
+                    <span>
+                      <span className="block text-xs font-semibold text-black">
+                        Use model-wise attachment for this format
+                      </span>
+                      <span className="block text-[11px] text-gray-500 mt-0.5">
+                        When on, a letter of this format also carries the file mapped to that customer's
+                        engine model in <b>Letter Master → Model-wise Attachments</b> (the master shared
+                        with the Welcome Letter). Customers whose model is not mapped simply get the
+                        default attachments. When off, this format never uses those files.
+                      </span>
+                    </span>
+                  </label>
 
                   {letterFormatHydrating && (
                     <p className="text-[11px] text-[#2f3192] mt-1 flex items-center gap-1">
@@ -5140,7 +5390,9 @@ const Campaign = () => {
                     className="flex-1 px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-black hover:bg-gray-50 transition-all disabled:opacity-50">
                     Cancel
                   </button>
-                  <button type="submit" disabled={letterFormatSaving || letterFormatHydrating || !letterFormatData.format_type_name.trim()}
+                  <button type="submit" disabled={letterFormatSaving || letterFormatHydrating
+                    || !letterFormatData.format_type_name.trim()
+                    || !(letterFormatData.products || []).some((p) => (p || '').trim())}
                     className="flex-1 text-white font-medium rounded-md py-1 text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     style={{ background: `linear-gradient(135deg, ${themeColor}, ${themeShades.dark})` }}>
                     {letterFormatSaving ? (<><ArrowPathIcon className="h-4 w-4 animate-spin" /> Saving...</>) : 'Save Format'}
@@ -5165,274 +5417,116 @@ const Campaign = () => {
                   <EyeIcon className="h-4 w-4 text-white shrink-0" />
                   <h2 className="text-sm lg:text-base font-semibold text-white truncate">{viewingLetterFormat.format_type_name}</h2>
                 </div>
-                <button onClick={() => setShowLetterFormatView(false)} className="w-7 h-7 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
+                <div className="ml-auto flex gap-0.5 rounded-lg bg-white/15 p-0.5 mr-2">
+                  {[['letter', 'Letter Preview'], ['attachments', 'Attachments']].map(([k, l]) => (
+                    <button key={k} type="button"
+                      onClick={() => {
+                        setLetterViewTab(k);
+                        if (k === 'attachments' && viewingLetterFormat?.use_model_attachments
+                          && viewModelAtts === null) loadViewModelAttachments();
+                      }}
+                      className="rounded-md px-3 py-1 text-[11.5px] font-semibold transition whitespace-nowrap"
+                      style={letterViewTab === k
+                        ? { background: '#fff', color: themeColor }
+                        : { color: 'rgba(255,255,255,0.85)' }}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setShowLetterFormatView(false)} className="w-7 h-7 shrink-0 bg-white text-black rounded-lg flex items-center justify-center hover:bg-gray-100">
                   <XMarkIcon className="h-4 w-4" />
                 </button>
               </div>
 
-              <div className="p-4 lg:p-5 overflow-y-auto custom-scrollbar space-y-4">
-
-                {/* Product */}
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Products</p>
-                  {(viewingLetterFormat.products || []).length === 0 ? (
-                    <span className="text-sm text-gray-400">None</span>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {viewingLetterFormat.products.map((p, idx) => (
-                        <span key={idx} className="inline-flex items-center px-2 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded text-xs font-medium">{p}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Note */}
-                {viewingLetterFormat.note && (
-                  <div>
-                    <p className="text-xs font-semibold text-black mb-1.5">Note</p>
-                    <div className="border border-gray-200 rounded-md p-2.5 bg-yellow-50">
-                      <p className="text-sm text-black whitespace-pre-wrap break-words">{viewingLetterFormat.note}</p>
-                    </div>
+              {letterViewTab === 'letter' && (
+                <div className="overflow-y-auto custom-scrollbar bg-gray-100 p-4">
+                  <div className="mx-auto max-w-[780px] shadow-sm">
+                    <LetterFormatPreview format={viewingLetterFormat} />
                   </div>
-                )}
-
-                {/* Reference No + Serial Start */}
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Reference No</p>
-                  {viewingLetterFormat.reference_no ? (
-                    <div className="flex flex-nowrap items-end gap-2 overflow-x-auto pb-1">
-                      {viewingLetterFormat.reference_no.split('/').map((part, idx, arr) => {
-                        const labels = ['Prefix', 'FY', 'Product', 'Branch Code', 'Serial No'];
-                        const isSerialNo = idx === arr.length - 1;
-                        return (
-                          <React.Fragment key={idx}>
-                            <div className="flex flex-col shrink-0">
-                              <span className="text-[10px] text-gray-500 mb-0.5">{labels[idx] || `Part ${idx + 1}`}</span>
-                              <div className={`border rounded-md px-2 py-1.5 text-sm text-center font-mono ${isSerialNo ? 'border-[#2f3192] bg-[#2f3192]/5 text-[#2f3192] font-semibold' : 'border-gray-200 bg-gray-50 text-black'}`}
-                                style={{ minWidth: '90px' }}>
-                                {isSerialNo ? (viewingLetterFormat.serial_start || '1') : part}
-                              </div>
-                            </div>
-                            {idx < arr.length - 1 && (
-                              <span className="text-gray-400 font-bold self-end mb-2">/</span>
-                            )}
-                          </React.Fragment>
-                        );
-                      })}
-                    </div>
-                  ) : <span className="text-sm text-gray-400">—</span>}
+                  <p className="mx-auto mt-2 max-w-[780px] text-center text-[11px] text-gray-500">
+                    The customer&apos;s own details replace the grey placeholders when the letter is sent.
+                    {lockedCount(viewingLetterFormat) > 0
+                      && ` ${lockedCount(viewingLetterFormat)} box(es) are locked and cannot be changed while sending.`}
+                  </p>
                 </div>
+              )}
 
-                {/* Format Type Name */}
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Format Type Name</p>
-                  <span className="text-sm text-black">{viewingLetterFormat.format_type_name || '—'}</span>
-                </div>
-
-                {/* Expiry Date */}
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Expiry Date</p>
-                  <span className="text-sm text-black">
-                    {viewingLetterFormat.expiry_date ? formatDate(viewingLetterFormat.expiry_date) : '—'}
-                  </span>
-                </div>
-
-                {/* Customer Detail Fields */}
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Customer Details in Reference</p>
-                  {(viewingLetterFormat.customer_detail_fields || []).length === 0 ? (
-                    <span className="text-sm text-gray-400">None selected</span>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {['instance_id', ...(viewingLetterFormat.customer_detail_fields || []).filter(f => f !== 'instance_id')].map((val, idx) => {
-                        const CUSTOMER_DETAIL_OPTIONS = [
-                          { value: 'instance_id', label: 'Instance ID' },
-                          { value: 'account_name', label: 'Account Name' },
-                          { value: 'kva_rating', label: 'KVA Rating' },
-                          { value: 'commissioning_date', label: 'Commissioning Date' },
-                          { value: 'application_code', label: 'Application Code' },
-                          { value: 'engine_no', label: 'Engine No.' },
-                          { value: 'engine_model', label: 'Engine Model' },
-                          { value: 'warranty_expiry', label: 'Warranty Expiry' },
-                          { value: 'product_segment', label: 'Product Segment' },
-                          { value: 'engine_series', label: 'Engine Series' },
-                          { value: 'segment', label: 'Segment' },
-                        ];
-                        const opt = CUSTOMER_DETAIL_OPTIONS.find(o => o.value === val);
-                        const isDefault = val === 'instance_id';
-                        return (
-                          <span key={idx} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${isDefault ? 'bg-[#2f3192] text-white' : 'bg-[#2f3192]/10 text-[#2f3192]'}`}>
-                            {opt ? opt.label : val}
-                            {isDefault && <span className="text-[10px] opacity-75">(default)</span>}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Start Paragraph */}
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Start Para</p>
-                  <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[30vh] overflow-y-auto">
-                    {viewingLetterFormat.start_para ? (
-                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-sans leading-relaxed">{viewingLetterFormat.start_para}</pre>
-                    ) : <span className="text-sm text-gray-400">No start paragraph provided</span>}
-                  </div>
-                </div>
-
-                {/* Service Cycle (CSP only) */}
-                {viewingLetterFormat.include_service_cycle && (
+              {letterViewTab === 'attachments' && (
+                <div className="p-4 lg:p-5 overflow-y-auto custom-scrollbar space-y-4">
+                  {/* Every file a letter of this format carries, in the order the
+                      customer receives them. Clicking one opens it in a new tab. */}
                   <div>
-                    <p className="text-xs font-semibold text-black mb-1.5">Service Cycle (CSP)</p>
-                    {viewingLetterFormat.service_cycle_intro && (
-                      <p className="text-[12px] text-gray-600 whitespace-pre-wrap mb-1.5">{viewingLetterFormat.service_cycle_intro}</p>
-                    )}
-                    {(viewingLetterFormat.service_cycle_rows || []).length === 0 ? (
-                      <span className="text-sm text-gray-400">No rows configured</span>
+                    <p className="text-xs font-semibold text-black mb-1.5">
+                      Default Attachments
+                      <span className="ml-1 font-normal text-gray-400">— on every letter of this format</span>
+                    </p>
+                    {(viewingLetterFormat.default_attachments || []).length === 0 ? (
+                      <span className="text-sm text-gray-400">None</span>
                     ) : (
-                      <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                        <table className="w-full text-[11px] max-md:min-w-[420px]">
-                          <thead className="bg-gray-100">
-                            <tr>
-                              {SERVICE_CYCLE_COLS.map(c => (
-                                <th key={c.key} className="px-2 py-1 text-left font-semibold text-black border-r border-gray-200 whitespace-nowrap">{c.label}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {viewingLetterFormat.service_cycle_rows.map((row, idx) => (
-                              <tr key={idx} className="border-t border-gray-100 align-top">
-                                <td className="px-2 py-1 border-r border-gray-100 text-black">{row.service_type || '-'}</td>
-                                <td className="px-2 py-1 border-r border-gray-100 text-black whitespace-pre-wrap">{row.schedule || '-'}</td>
-                                <td className="px-2 py-1 border-r border-gray-100 text-black whitespace-pre-wrap">{row.remarks || '-'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                      <div className="space-y-1.5">
+                        {viewingLetterFormat.default_attachments.map((att, idx) => (
+                          <button key={idx} type="button" onClick={() => openFormatAttachment(att)}
+                            title={`Open ${att.name}`}
+                            className="flex w-full items-center gap-2 p-2 bg-gray-50 rounded-md border text-left hover:bg-gray-100 transition-all">
+                            <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
+                            <span className="text-xs text-black truncate flex-1">{att.name}</span>
+                            {att.size ? <span className="text-xs text-gray-500 shrink-0">({(att.size / 1024).toFixed(0)} KB)</span> : null}
+                            {letterFormatHydrating && !att.content
+                              ? <ArrowPathIcon className="h-3 w-3 animate-spin text-gray-400 shrink-0" />
+                              : <EyeIcon className="h-3.5 w-3.5 text-gray-400 shrink-0" />}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
-                )}
 
-                {/* Engagement Detail Fields */}
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Engagement Details</p>
-                  {(viewingLetterFormat.engagement_detail_fields || []).length === 0 ? (
-                    <span className="text-sm text-gray-400">None selected</span>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {(viewingLetterFormat.engagement_detail_fields || []).map((val, idx) => {
-                        const ENGAGEMENT_DETAIL_OPTIONS = [
-                          { value: 'followup_history', label: 'Followups History' },
-                          { value: 'quotation_history', label: 'Quotation History' },
-                          { value: 'letter_history', label: 'Letter History' },
-                        ];
-                        const opt = ENGAGEMENT_DETAIL_OPTIONS.find(o => o.value === val);
-                        return (
-                          <span key={idx} className="inline-flex items-center px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
-                            {opt ? opt.label : val}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* End Paragraph */}
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">End Para</p>
-                  <div className="border border-gray-200 rounded-md p-3 bg-gray-50 max-h-[30vh] overflow-y-auto">
-                    {viewingLetterFormat.end_para ? (
-                      <pre className="text-sm text-black whitespace-pre-wrap break-words font-sans leading-relaxed">{viewingLetterFormat.end_para}</pre>
-                    ) : <span className="text-sm text-gray-400">No end paragraph provided</span>}
+                  <div>
+                    <p className="text-xs font-semibold text-black mb-1.5">
+                      Model-wise Attachments
+                      <span className="ml-1 font-normal text-gray-400">
+                        — only for the customer&apos;s own engine model
+                      </span>
+                    </p>
+                    {!viewingLetterFormat.use_model_attachments ? (
+                      <span className="text-sm text-gray-400">
+                        Off for this format — edit it to switch &quot;Use model-wise attachment&quot; on.
+                      </span>
+                    ) : viewModelAttsLoading ? (
+                      <span className="text-sm text-gray-400 inline-flex items-center gap-1">
+                        <ArrowPathIcon className="h-3 w-3 animate-spin" /> Loading…
+                      </span>
+                    ) : (viewModelAtts || []).length === 0 ? (
+                      <span className="text-sm text-gray-400">
+                        No engine model is mapped yet — set them up under Letter Master → Model-wise Attachments.
+                      </span>
+                    ) : (
+                      <div className="space-y-2">
+                        {viewModelAtts.map((g) => (
+                          <div key={g.attachment_id} className="rounded-md border bg-gray-50 p-2">
+                            <button type="button" title={`Open ${g.file_name}`}
+                              onClick={() => openModelAttachment(g.attachment_id, g.file_name)}
+                              className="flex w-full items-center gap-2 text-left">
+                              <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
+                              <span className="text-xs text-black truncate flex-1">{g.file_name}</span>
+                              {g.file_size ? <span className="text-xs text-gray-500 shrink-0">({(g.file_size / 1024).toFixed(0)} KB)</span> : null}
+                              <EyeIcon className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                            </button>
+                            <div className="mt-1 flex flex-wrap gap-1 pl-[22px]">
+                              {g.engine_models.map((m) => (
+                                <span key={m.id} className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                                  style={{ background: 'rgba(5,150,105,0.10)', color: '#047857' }}>
+                                  {m.engine_model}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
+              )}
 
-                {/* Default Recipients */}
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Default To/CC Recipients</p>
-                  {(viewingLetterFormat.default_recipients || []).length === 0 ? (
-                    <span className="text-sm text-gray-400">None configured</span>
-                  ) : (
-                    <div className="space-y-2">
-                      {(viewingLetterFormat.default_recipients || []).map((rule, idx) => (
-                        <div key={idx} className="border border-gray-200 rounded-md p-2.5 bg-gray-50 space-y-1.5">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-[11px] font-semibold text-[#2f3192]">Rule {idx + 1}:</span>
-                            {(rule.branch_codes || []).length === 0 ? (
-                              <span className="text-[11px] text-gray-500 italic">All remaining branches</span>
-                            ) : (
-                              (rule.branch_codes || []).map(code => {
-                                const branch = BRANCH_LIST.find(b => b.code === code);
-                                return (
-                                  <span key={code} className="inline-flex items-center px-1.5 py-0.5 bg-[#2f3192]/10 text-[#2f3192] rounded text-[10px] font-medium">
-                                    {branch ? branch.name : code}
-                                  </span>
-                                );
-                              })
-                            )}
-                            {(rule.goem_oems && rule.goem_oems.length > 0
-                              ? rule.goem_oems
-                              : (rule.goem_oem ? [rule.goem_oem] : [])
-                            ).map(g => (
-                              <span key={g} className="inline-flex items-center px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[10px] font-medium">
-                                GOEM: {g}
-                              </span>
-                            ))}
-                          </div>
-                          {(rule.to_emails || []).length > 0 && (
-                            <div className="flex flex-wrap items-center gap-1">
-                              <span className="text-[10px] font-semibold text-gray-500">To:</span>
-                              {rule.to_emails.map(e => (
-                                <span key={e} className="text-[11px] px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded">{e}</span>
-                              ))}
-                            </div>
-                          )}
-                          {(rule.cc_emails || []).length > 0 && (
-                            <div className="flex flex-wrap items-center gap-1">
-                              <span className="text-[10px] font-semibold text-gray-500">CC:</span>
-                              {rule.cc_emails.map(e => (
-                                <span key={e} className="text-[11px] px-1.5 py-0.5 bg-green-100 text-green-800 rounded">{e}</span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Default Attachments */}
-                <div>
-                  <p className="text-xs font-semibold text-black mb-1.5">Default Attachments</p>
-                  {(viewingLetterFormat.default_attachments || []).length === 0 ? (
-                    <span className="text-sm text-gray-400">None</span>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {viewingLetterFormat.default_attachments.map((att, idx) => (
-                        att.content ? (
-                          <a key={idx} href={`data:${att.type};base64,${att.content}`} download={att.name}
-                            className="flex items-center gap-2 p-2 bg-gray-50 rounded-md border hover:bg-gray-100 transition-all">
-                            <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
-                            <span className="text-xs text-black truncate flex-1">{att.name}</span>
-                            <span className="text-xs text-gray-500">({(att.size / 1024).toFixed(0)} KB)</span>
-                          </a>
-                        ) : (
-                          <div key={idx} className="flex items-center gap-2 p-2 bg-gray-50 rounded-md border opacity-70">
-                            <DocumentIcon className="h-3.5 w-3.5 text-[#2f3192] shrink-0" />
-                            <span className="text-xs text-black truncate flex-1">{att.name}</span>
-                            {letterFormatHydrating
-                              ? <ArrowPathIcon className="h-3 w-3 animate-spin text-gray-400" />
-                              : <span className="text-xs text-gray-500">({(att.size / 1024).toFixed(0)} KB)</span>}
-                          </div>
-                        )
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-              </div>
 
               <div className="px-4 lg:px-5 py-3 border-t flex justify-end gap-2">
                 <button onClick={() => { setShowLetterFormatView(false); openEditLetterFormat(viewingLetterFormat); }}

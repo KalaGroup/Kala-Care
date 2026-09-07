@@ -4,7 +4,7 @@ from typing import List
 from app.database import SessionLocal
 from app.controllers.user_controller import (
     UserController, aop_tabs_map, AOP_TAB_KEYS, pms_pages_list, PMS_PAGE_KEYS,
-    annual_tabs_list, ANNUAL_TAB_KEYS
+    annual_tabs_list, ANNUAL_TAB_KEYS, import_files_list
 )
 from app.schemas.user_schema import (
     UserCreate, UserLogin, 
@@ -110,6 +110,9 @@ def login(user_login: UserLogin, db: Session = Depends(get_db)):
                     "can_access_approval": bool(user.can_access_approval),
                     "can_access_pms": bool(user.can_access_pms),
                     "can_access_quotation_tracker": bool(user.can_access_quotation_tracker),
+                    "can_access_import": bool(user.can_access_import),
+                    # Which Data Upload files this user may upload; null = every file.
+                    "import_files": import_files_list(user),
                     "aop_access": user.aop_access or "none",
                     # {tab: 'view'|'edit'} — which AOP & Master tabs this user
                     # gets. null = no per-tab restriction (whole page at the
@@ -421,6 +424,9 @@ def get_all_employees(
                         "can_access_approval": bool(emp.can_access_approval),
                         "can_access_pms": bool(emp.can_access_pms),
                         "can_access_quotation_tracker": bool(emp.can_access_quotation_tracker),
+                        "can_access_import": bool(emp.can_access_import),
+                        # Which Data Upload files this user may upload; null = every file.
+                        "import_files": import_files_list(emp),
                         "aop_access": emp.aop_access or "none",
                         # Which PMS report pages this user gets; null = every page.
                         "pms_pages": pms_pages_list(emp),
@@ -637,7 +643,8 @@ def toggle_page_access(
         updated = UserController.toggle_page_access(db, employee_id, user_id, page, allowed)
 
         page_label = {"part_detail": "Part Detail Info", "approval": "Approval Application",
-                      "pms": "PMS", "quotation_tracker": "Open Quotation Tracker"}.get(page, "MOM Tracking")
+                      "pms": "PMS", "quotation_tracker": "Open Quotation Tracker",
+                      "import": "Data Upload"}.get(page, "MOM Tracking")
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
@@ -650,6 +657,8 @@ def toggle_page_access(
                     "can_access_approval": bool(updated.can_access_approval),
                     "can_access_pms": bool(updated.can_access_pms),
                     "can_access_quotation_tracker": bool(updated.can_access_quotation_tracker),
+                    "can_access_import": bool(updated.can_access_import),
+                    "import_files": import_files_list(updated),
                     "aop_access": updated.aop_access or "none",
                     # Which PMS report pages this user gets; null = every page.
                     "pms_pages": pms_pages_list(updated),
@@ -803,6 +812,49 @@ def set_annual_tabs(
             detail=f"Error setting the Annual Reports sheets: {str(e)}"
         )
 
+@router.put("/employees/{employee_id}/import-files")
+def set_import_files(
+    employee_id: int,
+    body: dict,
+    user_id: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    """Choose WHICH files a user may upload on the Data Upload page.
+    Body: { files: ['Asset Detailed Report', ...] } — files left out are
+    blocked. Send { files: null } to drop the restriction (every file).
+    Master Admin only, same gate as the Data Upload access flag."""
+    try:
+        files = body.get('files', None) if isinstance(body, dict) else None
+        updated = UserController.set_import_files(db, employee_id, user_id, files)
+
+        chosen = import_files_list(updated)
+        if chosen is None:
+            message = "Data Upload files: all files allowed"
+        elif not chosen:
+            message = "Data Upload files: none — nothing can be uploaded"
+        else:
+            message = f"Data Upload files: {len(chosen)} selected"
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": True,
+                "message": message,
+                "employee": {
+                    "id": updated.id,
+                    "can_access_import": bool(updated.can_access_import),
+                    "import_files": chosen,
+                }
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error setting the Data Upload files: {str(e)}"
+        )
+
 @router.put("/employees/{employee_id}/aop-tabs")
 def set_aop_tabs(
     employee_id: int,
@@ -926,6 +978,9 @@ def get_profile(
                     "can_access_approval": bool(user.can_access_approval),
                     "can_access_pms": bool(user.can_access_pms),
                     "can_access_quotation_tracker": bool(user.can_access_quotation_tracker),
+                    "can_access_import": bool(user.can_access_import),
+                    # Which Data Upload files this user may upload; null = every file.
+                    "import_files": import_files_list(user),
                     "aop_access": user.aop_access or "none",
                     # Which PMS report pages this user gets; null = every page.
                     "pms_pages": pms_pages_list(user),

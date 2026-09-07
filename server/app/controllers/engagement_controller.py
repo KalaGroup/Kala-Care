@@ -3256,6 +3256,62 @@ class EngagementController:
             "created_at": r.created_at,
         } for r in rows]
 
+    @staticmethod
+    def _letter_email_document(html_body: str) -> str:
+        """Wrap the cover note in a minimal, well-formed email document.
+
+        Deliberately NO background and NO colour overrides: the note is a couple
+        of lines of covering text, not stationery, so it should sit on whatever
+        the reader's client uses — white in a light inbox, dark in a dark one.
+        Forcing white made it a glaring card in dark mode.
+
+        Not setting a background is only half of it: Gmail and Apple Mail put a
+        message on white REGARDLESS unless it declares that it can handle a dark
+        one, which is what the color-scheme / supported-color-schemes pair does.
+
+        No HTML comments either — they would ship in every message for no
+        reader's benefit, and the point here is to stay small.
+
+        The markup is kept as small as possible for a second reason: Gmail hides
+        content behind "Show trimmed content" when a message is bulky or repeats
+        itself, so there is no <style> block, no wrapper tables and no repeated
+        text — only a charset, a viewport and the note itself.
+
+        (The Welcome Letter's own email is the exception and DOES force light
+        mode — it is a letterhead on white paper, and its bands would sit on a
+        dark rectangle otherwise.)
+        """
+        body = html_body or ""
+        if "<html" in body.lower():
+            return body                       # already a document
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+</head>
+<body style="margin:0;padding:0;-webkit-text-size-adjust:100%">
+<div style="max-width:640px;margin:0 auto;padding:16px 18px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6">
+{body}
+</div>
+</body>
+</html>"""
+
+    @staticmethod
+    def _html_to_text(html_body: str) -> str:
+        """A readable text/plain twin of the cover note."""
+        import re as _re
+        from html import unescape
+
+        text = _re.sub(r"(?i)<br\s*/?>", "\n", html_body or "")
+        text = _re.sub(r"(?i)</(p|div|tr|h[1-6])>", "\n", text)
+        text = _re.sub(r"<[^>]+>", "", text)
+        text = unescape(text).replace("\u00a0", " ")
+        text = _re.sub(r"[ \t]+", " ", text)
+        return _re.sub(r"\n{3,}", "\n\n", text).strip()
+
     def _send_letter_email(self, to_email, subject, html_body, attachments, cc_emails=None, to_extra=None):
         if not all([self.sender_email, self.sender_password]):
             return False, "Company email is not configured"
@@ -3292,13 +3348,26 @@ class EngagementController:
             if cc_clean:
                 msg['Cc'] = ", ".join(cc_clean)
             msg['Subject'] = subject or "Letter from KALA Care"
-            msg.attach(MIMEText(html_body or "", 'html'))
+
+            # mixed -> [ alternative -> (text, html) , attachments ]
+            # A real text part is what keeps the letter out of the spam folder and
+            # what a client that refuses HTML shows instead of a blank message.
+            document = self._letter_email_document(html_body)
+            alternative = MIMEMultipart('alternative')
+            alternative.attach(MIMEText(self._html_to_text(html_body), 'plain', 'utf-8'))
+            alternative.attach(MIMEText(document, 'html', 'utf-8'))
+            msg.attach(alternative)
 
             # Attach files IN ORDER. The caller already puts the rendered letter PDF
             # FIRST, so it appears before the other attachments in the email. Use each
             # file's real content type (e.g. application/pdf) so the letter shows as a
             # proper, previewable PDF instead of a generic binary blob.
             for att in (attachments or []):
+                # skip_email: the letter PDF sent to the customer already carries
+                # this file as pages — it is stored on the record for the history
+                # view/print but must not go out as a separate email attachment.
+                if att.get('skip_email'):
+                    continue
                 content = att.get('content')
                 if not content:
                     continue

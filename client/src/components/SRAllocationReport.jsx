@@ -270,7 +270,15 @@ const SRAllocationReport = ({ periodFrom, periodTo, preloaded }) => {
     take(alRec, 'a', 'ac');
     take(clRec, 'c', 'cc');
 
-    const active = emp.map((e) => e.a > 0 || e.c > 0);
+    // An engineer whose last working day falls BEFORE the period start is off
+    // the roster for that period — the same rule Employee Productivity uses, so
+    // the two reports always show the same people. Only a last day that is
+    // actually known can hide anyone.
+    const active = emp.map((e, ei) => {
+      const left = employees[ei]?.left;
+      if (left && left < start) return false;
+      return e.a > 0 || e.c > 0;
+    });
     const byBranch = branches.map(() => []);
     employees.forEach((e, ei) => { if (active[ei]) byBranch[e.b].push(ei); });
     byBranch.forEach((list) => list.sort((a, b) =>
@@ -825,8 +833,16 @@ const SRAllocationReport = ({ periodFrom, periodTo, preloaded }) => {
   // bottom, immediately above the Grand Total. Read off branch_regions, so a new
   // branch lands in its own region's total without touching this file.
   const regionAt = (gi) => regionOf(visibleGroups[gi][0]);
+  // A user scoped to their own branches (every non-HO Branch Admin / Employee —
+  // the backend flags their payload `branch_scoped`) gets NO region row: an
+  // 'MH Total' over one or two of MH's branches is not the region's total, it
+  // is their own Grand Total wearing the region's name. Left empty, the two
+  // `lastOfRegion[...] === gi` gates below never fire, on screen or in the
+  // Excel export.
   const lastOfRegion = {};
-  visibleGroups.forEach((g, gi) => { lastOfRegion[regionAt(gi)] = gi; });
+  if (!data.branch_scoped) {
+    visibleGroups.forEach((g, gi) => { lastOfRegion[regionAt(gi)] = gi; });
+  }
   const regionRows = (rg) => {
     const list = allVisible.filter((bi) => regionOf(bi) === rg);
     if (!list.length) return [];

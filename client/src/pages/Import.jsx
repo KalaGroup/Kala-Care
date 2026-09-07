@@ -17,6 +17,7 @@ import {
 } from '@heroicons/react/24/outline';
 import * as XLSX from 'xlsx';
 import { startUpload, finishUpload, useUploads } from '../utils/uploadStatus';
+import { visibleImportFileTypes } from '../utils/pagePermission';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
@@ -540,6 +541,15 @@ const FILE_TYPE_IMPORTANT_COLUMNS = {
 // Alternate spellings accepted for required/important columns (word-level
 // renames that case/space normalization can't bridge). Mirrors backend aliases.
 const IMPORTANT_COLUMN_ALIASES = {
+    "Asset Detailed Report": {
+        // EMISSION NORM is a FIXED column: this is the ONLY import that carries
+        // the norm, and the engine model -> attachment master behind the Welcome
+        // Letter and the drive Letter Master reads it off asset_detailed. KOEL
+        // exports spell it with a double m often enough that the header must
+        // never be allowed to fall through to a dynamic column.
+        "EMISSION NORM": ["EMMISSION NORM", "EMISSION NORMS", "EMMISSION NORMS",
+            "EMISSION"]
+    },
     "Open SR Load Report": {
         "Engine Serial#": ["Engine Serial No", "Engine Serial Number"],
         "Service Request #": ["Service Request No", "Service Request Number"],
@@ -792,6 +802,16 @@ const pickSeparator = (text) => {
 };
 
 const Import = () => {
+    // Who is logged in. Master Admin uploads everything; a branch admin /
+    // employee reaches this page through the "Data Upload Access" flag granted
+    // from Profile, and their per-file list narrows the file-type menu below
+    // (the server enforces the same list on the upload endpoint).
+    const currentUser = (() => {
+        try { return JSON.parse(sessionStorage.getItem('user')) || null; } catch { return null; }
+    })();
+    const allowedFileTypes = visibleImportFileTypes(currentUser);
+    const visibleFileTypes = FILE_TYPES_SORTED.filter(t => allowedFileTypes.includes(t));
+
     const [files, setFiles] = useState([]);
     const [uploading, setUploading] = useState(false);
     // Uploading as far as the UI is concerned: either this mount started it, or
@@ -1180,7 +1200,12 @@ const Import = () => {
         try {
             // 1. Submit the job
             const submitRes = await axios.post(`${API_BASE_URL}/import/excel`, formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    // The server checks this user's Data Upload rights and logs
+                    // them as the uploader ("Last data update ... by").
+                    'user-id': String(currentUser?.user_id || ''),
+                },
             });
 
             const { job_id } = submitRes.data;
@@ -1343,7 +1368,7 @@ const Import = () => {
                                             is still reachable by scrolling inside the menu. */}
                                         {fileTypeMenuOpen && (
                                             <div className="absolute left-0 right-0 top-full z-30 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto overscroll-contain">
-                                                {FILE_TYPES_SORTED.map(type => (
+                                                {visibleFileTypes.map(type => (
                                                     <button
                                                         key={type}
                                                         type="button"
@@ -1377,6 +1402,14 @@ const Import = () => {
                                                     <span className="font-semibold">Last data update:</span>{" "}
                                                     {formatDateTime(lastUpdatedInfo.last_updated)}
                                                 </span>
+                                                {/* WHO uploaded — from the upload log; data older
+                                                    than the log simply shows no uploader. */}
+                                                {lastUpdatedInfo.uploaded_by_name && (
+                                                    <span className="text-[10px] sm:text-xs text-black">
+                                                        <span className="font-semibold">Uploaded by:</span>{" "}
+                                                        {lastUpdatedInfo.uploaded_by_name}
+                                                    </span>
+                                                )}
                                                 <span className="text-[10px] sm:text-xs text-black">
                                                     <span className="font-semibold">Total records:</span>{" "}
                                                     {lastUpdatedInfo.total_records.toLocaleString("en-IN")}

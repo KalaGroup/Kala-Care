@@ -35,6 +35,65 @@ export const canAccessQuotationTracker = (user) => {
     return u.role === 'master_admin' || u.can_access_quotation_tracker === true;
 };
 
+/* ---- Data Upload page (Engagement Masters) ----------------------------
+   Master Admin always has it; a branch admin / employee needs the
+   can_access_import flag Master Admin grants from Profile, and their
+   import_files list then says WHICH files they may upload. Same no-role-
+   fallback rule as the Quotation Tracker: a session created before this
+   permission existed carries no flag, and must not inherit the page. */
+export const canAccessDataUpload = (user) => {
+    const u = readUser(user);
+    if (!u) return false;
+    return u.role === 'master_admin' || u.can_access_import === true;
+};
+
+/** The Data Upload page's file types. This is the registry Profile grants
+    from; keep it in step with FILE_TYPES in server/app/routes/import_routes.py
+    (which the Import page mirrors in its own FILE_TYPES list). */
+export const IMPORT_FILE_TYPES = [
+    'AMC Population Report',
+    'Asset Detailed Report',
+    'Asset Details with Last Oil Service',
+    'Anubandhan Plus Quotes Report',
+    'Anubandhan Quotes Report',
+    'BandhanPlus Quotes Report',
+    'Pulse Quotation - Service Only',
+    'Regular Bandhan Customers Report',
+    'LMS Data for ERP',
+    'LMS Data from Insia',
+    'Open SR Load Report',
+    'MaxTTR - Oil Change SR Zero Labour Flag',
+    'Response Time & MaxTTR Details',
+    'CDI Detail Report',
+    'EFSR Report',
+    'AMC Agreement Expiry Planner',
+    'All Invoice Detailed Report',
+];
+
+/** The stored per-file list, or NULL when the user was never scoped — then the
+    access flag opens every file. An EMPTY array is the opposite: no file was
+    ticked. The Master Admin is never scoped. */
+export const importFilesList = (user) => {
+    const u = readUser(user);
+    if (!u) return null;
+    if (u.role === 'master_admin') return null;      // never scoped
+    let raw = u.import_files;
+    if (raw === undefined || raw === null || raw === '') return null;
+    if (typeof raw === 'string') {
+        try { raw = JSON.parse(raw); } catch { return null; }
+    }
+    if (!Array.isArray(raw)) return null;
+    return IMPORT_FILE_TYPES.filter((f) => raw.includes(f));   // registry order
+};
+
+/** The file types this user may upload, in registry order. */
+export const visibleImportFileTypes = (user) => {
+    const u = readUser(user);
+    if (!canAccessDataUpload(u)) return [];
+    const files = importFilesList(u);
+    return files === null ? IMPORT_FILE_TYPES : files;
+};
+
 /* ---- PMS module -------------------------------------------------------
    PMS Access (all PMS pages) is one flag, granted by Master Admin from
    Profile. The AOP & Master page inside it has its own three levels —
@@ -60,6 +119,38 @@ export const canAccessPms = (user) => {
     return u.role === 'master_admin' || u.can_access_pms === true;
 };
 
+/* ---- PMS branch scope ------------------------------------------------
+   The Sales & Labour report (and the other branch-wise PMS reports) show a
+   user only the branches they belong to: the branch on their Profile plus
+   every branch ticked in their branch access list. The Master Admin, the AOP
+   rights admins, and ANY user carrying the HO branch see every branch — HO is
+   the head office.
+
+   The SERVER is the authority: _branch_scope in server/app/routes/pms_routes.py
+   resolves the same thing from the database and the payload never carries
+   another branch's figures. This copy exists only so the page can hide the
+   parts a scoped user has no business seeing (the uploaded-file preview, the
+   whole-FY panels) instead of rendering them empty. Keep the two in step. */
+const HO_BRANCH_CODE = 'HO';
+
+/** The branch codes this user may see, or NULL for "every branch". */
+export const pmsBranchScope = (user) => {
+    const u = readUser(user);
+    if (!u) return [];
+    if (u.role === 'master_admin' || isAopRightsAdmin(u)) return null;
+    const codes = new Set([String(u.branch || '').trim()]);
+    (Array.isArray(u.branches) ? u.branches : []).forEach((b) => {
+        const c = String((b && b.branch) || '').trim();
+        if (c) codes.add(c);
+    });
+    codes.delete('');
+    if ([...codes].some((c) => c.toUpperCase() === HO_BRANCH_CODE)) return null;
+    return [...codes].sort();
+};
+
+/** Is this user held to a few branches on the PMS reports? */
+export const isPmsBranchScoped = (user) => pmsBranchScope(user) !== null;
+
 /** The REPORT pages inside PMS, in menu order. PMS Access opens the module and
     this list says which reports the user actually sees. AOP & Master is
     deliberately NOT here — it has its own view/edit rights and its own per-tab
@@ -67,7 +158,7 @@ export const canAccessPms = (user) => {
     server/app/controllers/user_controller.py and with the page= each endpoint
     passes to _require_pms_page in server/app/routes/pms_routes.py. */
 export const PMS_PAGES = [
-    { key: 'sales_labour', name: 'Sales & Labour Report', path: '/sales-labour-report' },
+    { key: 'sales_labour', name: 'Part & Labour Sale', path: '/sales-labour-report' },
     { key: 'employee_productivity', name: 'Employee Productivity', path: '/employee-productivity' },
     { key: 'sr_allocation', name: 'SR Allocation Report', path: '/sr-allocation' },
     { key: 'se_performance', name: 'SE Performance', path: '/se-performance' },

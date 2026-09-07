@@ -19,7 +19,7 @@ def get_db():
 # ==================== Customer Engagement List ====================
 
 @router.get("/customers", response_model=dict)
-async def get_customer_engagement_list(
+def get_customer_engagement_list(
     from_date: Optional[str] = Query(None, description="From date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, description="To date (YYYY-MM-DD)"),
     db: Session = Depends(get_db)
@@ -34,7 +34,7 @@ async def get_customer_engagement_list(
 # ==================== Customer Details with Follow-ups ====================
 
 @router.get("/customers/{customer_id}", response_model=dict)
-async def get_customer_engagement_details(
+def get_customer_engagement_details(
     customer_id: int, 
     db: Session = Depends(get_db)
 ):
@@ -47,7 +47,7 @@ async def get_customer_engagement_details(
 # ==================== Follow-up Endpoints ====================
 
 @router.get("/customers/{customer_id}/followups", response_model=List[dict])
-async def get_customer_followups(
+def get_customer_followups(
     customer_id: int, 
     db: Session = Depends(get_db)
 ):
@@ -56,7 +56,7 @@ async def get_customer_followups(
     return controller.get_followups(customer_id)
 
 @router.get("/followups/{followup_id}", response_model=dict)
-async def get_followup(
+def get_followup(
     followup_id: int, 
     db: Session = Depends(get_db)
 ):
@@ -65,7 +65,7 @@ async def get_followup(
     return controller.get_followup(followup_id)
 
 @router.post("/customers/{customer_id}/followups", status_code=status.HTTP_201_CREATED, response_model=dict)
-async def create_followup(
+def create_followup(
     customer_id: int, 
     followup: engagement_schema.FollowUpCreate, 
     db: Session = Depends(get_db)
@@ -75,7 +75,7 @@ async def create_followup(
     return controller.create_followup(customer_id, followup)
 
 @router.put("/followups/{followup_id}", response_model=dict)
-async def update_followup(
+def update_followup(
     followup_id: int, 
     followup: engagement_schema.FollowUpUpdate, 
     db: Session = Depends(get_db)
@@ -85,7 +85,7 @@ async def update_followup(
     return controller.update_followup(followup_id, followup)
 
 @router.delete("/followups/{followup_id}", response_model=dict)
-async def delete_followup(
+def delete_followup(
     followup_id: int, 
     db: Session = Depends(get_db)
 ):
@@ -96,7 +96,7 @@ async def delete_followup(
 # ==================== Campaign Management ====================
 
 @router.post("/campaigns/{campaign_id}/customers/{customer_id}", response_model=dict)
-async def add_customer_to_campaign(
+def add_customer_to_campaign(
     campaign_id: int,
     customer_id: int,
     db: Session = Depends(get_db)
@@ -106,7 +106,7 @@ async def add_customer_to_campaign(
     return controller.add_customer_to_campaign(campaign_id, customer_id)
 
 @router.delete("/campaigns/{campaign_id}/customers/{customer_id}", response_model=dict)
-async def remove_customer_from_campaign(
+def remove_customer_from_campaign(
     campaign_id: int,
     customer_id: int,
     db: Session = Depends(get_db)
@@ -118,7 +118,7 @@ async def remove_customer_from_campaign(
 # ==================== Follow-up Flags Info ====================
 
 @router.get("/followup-flags", response_model=dict)
-async def get_followup_flags():
+def get_followup_flags():
     """Get information about follow-up flags"""
     return {
         "C1": {"days": 10, "description": "10 days follow-up"},
@@ -130,7 +130,7 @@ async def get_followup_flags():
 # ==================== Activity Endpoints ====================
 
 @router.get("/activities", response_model=List[dict])
-async def get_all_activities(
+def get_all_activities(
     db: Session = Depends(get_db)
 ):
     """Get all activities (common for all customers)"""
@@ -138,7 +138,7 @@ async def get_all_activities(
     return controller.get_activities()
 
 @router.post("/activities", status_code=status.HTTP_201_CREATED, response_model=dict)
-async def create_activity(
+def create_activity(
     activity: engagement_schema.ActivityCreate, 
     db: Session = Depends(get_db)
 ):
@@ -147,7 +147,7 @@ async def create_activity(
     return controller.create_activity(activity)
 
 @router.put("/activities/{activity_id}", response_model=dict)
-async def update_activity(
+def update_activity(
     activity_id: int, 
     activity: engagement_schema.ActivityUpdate, 
     db: Session = Depends(get_db)
@@ -157,7 +157,7 @@ async def update_activity(
     return controller.update_activity(activity_id, activity)
 
 @router.delete("/activities/{activity_id}", response_model=dict)
-async def delete_activity(
+def delete_activity(
     activity_id: int, 
     db: Session = Depends(get_db)
 ):
@@ -169,7 +169,7 @@ async def delete_activity(
 # ==================== RR Endpoints ====================
 
 @router.get("/rr", response_model=List[dict])
-async def get_all_rr(
+def get_all_rr(
     db: Session = Depends(get_db)
 ):
     """Get all RR entries (common for all customers)"""
@@ -177,7 +177,7 @@ async def get_all_rr(
     return controller.get_rr()
 
 @router.post("/rr", status_code=status.HTTP_201_CREATED, response_model=dict)
-async def create_rr(
+def create_rr(
     rr: engagement_schema.RRCreate, 
     db: Session = Depends(get_db)
 ):
@@ -186,7 +186,7 @@ async def create_rr(
     return controller.create_rr(rr)
 
 @router.put("/rr/{rr_id}", response_model=dict)
-async def update_rr(
+def update_rr(
     rr_id: int, 
     rr: engagement_schema.RRUpdate, 
     db: Session = Depends(get_db)
@@ -196,7 +196,7 @@ async def update_rr(
     return controller.update_rr(rr_id, rr)
 
 @router.delete("/rr/{rr_id}", response_model=dict)
-async def delete_rr(
+def delete_rr(
     rr_id: int, 
     db: Session = Depends(get_db)
 ):
@@ -206,7 +206,7 @@ async def delete_rr(
 
 # ==================== Export Permission Check ====================
 @router.get("/check-export-permission", response_model=dict)
-async def check_export_permission(
+def check_export_permission(
     user_id: str = Query(..., description="User ID to check export permission"),
     db: Session = Depends(get_db)
 ):
@@ -244,7 +244,7 @@ async def check_export_permission(
 # ==================== Non-Campaign Customers Endpoint ====================
 
 @router.get("/non-campaign-customers", response_model=dict)
-async def get_non_campaign_customers(
+def get_non_campaign_customers(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(20, ge=1, le=10000, description="Items per page"),
     search: Optional[str] = Query(None, description="Search instance_id / name / mobile / email"),
@@ -268,7 +268,7 @@ async def get_non_campaign_customers(
     return result    
 
 @router.get("/customers/{customer_id}/non-followups", response_model=List[dict])
-async def get_customer_non_followups(
+def get_customer_non_followups(
     customer_id: int, 
     db: Session = Depends(get_db)
 ):
@@ -278,7 +278,7 @@ async def get_customer_non_followups(
 
 
 @router.get("/non-followups/{non_followup_id}", response_model=dict)
-async def get_non_followup(
+def get_non_followup(
     non_followup_id: int, 
     db: Session = Depends(get_db)
 ):
@@ -288,7 +288,7 @@ async def get_non_followup(
 
 
 @router.post("/customers/{customer_id}/non-followups", status_code=status.HTTP_201_CREATED, response_model=dict)
-async def create_non_followup(
+def create_non_followup(
     customer_id: int, 
     non_followup: engagement_schema.NonFollowUpCreate, 
     db: Session = Depends(get_db)
@@ -299,7 +299,7 @@ async def create_non_followup(
 
 
 @router.put("/non-followups/{non_followup_id}", response_model=dict)
-async def update_non_followup(
+def update_non_followup(
     non_followup_id: int, 
     non_followup: engagement_schema.NonFollowUpUpdate, 
     db: Session = Depends(get_db)
@@ -310,7 +310,7 @@ async def update_non_followup(
 
 
 @router.delete("/non-followups/{non_followup_id}", response_model=dict)
-async def delete_non_followup(
+def delete_non_followup(
     non_followup_id: int, 
     db: Session = Depends(get_db)
 ):
@@ -319,7 +319,7 @@ async def delete_non_followup(
     return controller.delete_non_followup(non_followup_id)
 
 @router.get("/csp-status", response_model=dict)
-async def get_csp_status(
+def get_csp_status(
     branch_id: Optional[str] = Query(None, description="User branch id"),
     role: Optional[str] = Query(None, description="User role"),
     db: Session = Depends(get_db)
@@ -329,7 +329,7 @@ async def get_csp_status(
     return controller.get_csp_status_for_branch(branch_id, role)    
 
 @router.post("/warranty-expiry-map", response_model=dict)
-async def get_warranty_expiry_map(
+def get_warranty_expiry_map(
     payload: dict = Body(...),
     db: Session = Depends(get_db)
 ):
@@ -344,7 +344,7 @@ async def get_warranty_expiry_map(
     return {"warranty_map": controller.get_warranty_expiry_map(instance_ids)}
 
 @router.get("/campaigns/{campaign_id}/scripts/{script_index}", response_model=dict)
-async def get_campaign_script_pdf(
+def get_campaign_script_pdf(
     campaign_id: int,
     script_index: int,
     db: Session = Depends(get_db)
@@ -356,7 +356,7 @@ async def get_campaign_script_pdf(
 # ==================== Letter Sending ====================
 
 @router.get("/letter/next-ref", response_model=dict)
-async def get_letter_next_ref(
+def get_letter_next_ref(
     instance_id: str = Query(..., description="Customer instance_id"),
     format_type_id: Optional[int] = Query(None, description="Letter format master ID"),
     db: Session = Depends(get_db)
@@ -367,7 +367,7 @@ async def get_letter_next_ref(
 
 
 @router.get("/letter/history", response_model=list)
-async def get_letter_history(
+def get_letter_history(
     instance_id: str = Query(..., description="Customer instance_id"),
     db: Session = Depends(get_db)
 ):
@@ -377,7 +377,7 @@ async def get_letter_history(
 
 
 @router.post("/letter/send", response_model=dict)
-async def send_letter(
+def send_letter(
     payload: dict = Body(...),
     db: Session = Depends(get_db)
 ):
@@ -387,7 +387,7 @@ async def send_letter(
 
 
 @router.post("/letter/save-draft", response_model=dict)
-async def save_letter_draft(
+def save_letter_draft(
     payload: dict = Body(...),
     db: Session = Depends(get_db)
 ):
@@ -397,7 +397,7 @@ async def save_letter_draft(
 
 
 @router.get("/letter/record/{record_id}", response_model=dict)
-async def get_letter_record(
+def get_letter_record(
     record_id: int,
     db: Session = Depends(get_db)
 ):
@@ -406,7 +406,7 @@ async def get_letter_record(
     return controller.get_letter_record(record_id)    
 
 @router.get("/letter/default-recipients", response_model=dict)
-async def get_letter_default_recipients(
+def get_letter_default_recipients(
     format_type_id: Optional[int] = Query(None),
     branch_id: Optional[str] = Query(None),
     goem_oem: Optional[str] = Query(None),

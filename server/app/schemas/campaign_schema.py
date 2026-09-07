@@ -167,8 +167,12 @@ class LetterFormatBase(BaseModel):
     customer_detail_fields: List[str] = []
     engagement_detail_fields: List[str] = []
     default_recipients: List[Dict[str, Any]] = []
+    subject: Optional[str] = None
     start_para: Optional[str] = None
     end_para: Optional[str] = None
+    signature_para: Optional[str] = None
+    editable_fields: Optional[Dict[str, Any]] = None
+    use_model_attachments: Optional[bool] = False
     include_service_cycle: Optional[bool] = False
     service_cycle_intro: Optional[str] = None
     service_cycle_rows: Optional[List[Dict[str, Any]]] = []
@@ -209,8 +213,12 @@ class LetterFormatUpdate(BaseModel):
     customer_detail_fields: Optional[List[str]] = None
     engagement_detail_fields: Optional[List[str]] = None
     default_recipients: Optional[List[Dict[str, Any]]] = None
+    subject: Optional[str] = None
     start_para: Optional[str] = None
     end_para: Optional[str] = None
+    signature_para: Optional[str] = None
+    editable_fields: Optional[Dict[str, Any]] = None
+    use_model_attachments: Optional[bool] = False
     include_service_cycle: Optional[bool] = False
     service_cycle_intro: Optional[str] = None
     service_cycle_rows: Optional[List[Dict[str, Any]]] = []

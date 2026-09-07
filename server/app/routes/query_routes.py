@@ -57,7 +57,7 @@ def can_view_all_queries(role: str) -> bool:
 
 # Routes
 @router.post("/create")
-async def create_query_endpoint(
+def create_query_endpoint(
     request: Request,
     query_data: QueryCreate,
     db: Session = Depends(get_db)
@@ -85,7 +85,7 @@ async def create_query_endpoint(
         raise HTTPException(status_code=500, detail=result["error"])
 
 @router.get("/all")
-async def get_all_queries_endpoint(
+def get_all_queries_endpoint(
     request: Request,
     db: Session = Depends(get_db)
 ):
@@ -129,7 +129,7 @@ async def get_all_queries_endpoint(
     return queries
 
 @router.get("/my-queries")
-async def get_my_queries_endpoint(
+def get_my_queries_endpoint(
     request: Request,
     db: Session = Depends(get_db)
 ):
@@ -143,7 +143,7 @@ async def get_my_queries_endpoint(
     return {"success": True, "queries": queries}
 
 @router.delete("/{query_id}")
-async def delete_query_endpoint(
+def delete_query_endpoint(
     query_id: int,
     request: Request,
     db: Session = Depends(get_db)
@@ -179,7 +179,7 @@ async def delete_query_endpoint(
         raise HTTPException(status_code=status_code, detail=result["error"])
 
 @router.put("/{query_id}/toggle-resolve")
-async def toggle_resolve_query_endpoint(
+def toggle_resolve_query_endpoint(
     query_id: int,
     request: Request,
     db: Session = Depends(get_db)

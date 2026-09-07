@@ -43,15 +43,22 @@ const inRange = (value, min, max) => {
    fetching it twice just to open the box was a wasted full round trip on a
    payload that grows with every application. Without the prop (standalone use)
    it loads for itself as before. */
-export default function ApprovalReports({ onClose, initialStatus = '', title = 'Approval Reports', records = null, allowAct = false, onChanged = null }) {
+/* `initialFilters` presets any of the filter fields (branch / search / status /
+   dates …) — the NFA Insights box uses it to drill an aggregate row down into
+   this record list. Undefined / empty values are ignored. */
+export default function ApprovalReports({ onClose, initialStatus = '', title = 'Approval Reports', records = null, allowAct = false, onChanged = null, initialFilters = null, initialTab = 'discounting' }) {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     const canExport = user.role === 'master_admin' || user.can_export === true;
 
     const [apps, setApps] = useState(() =>
         records ? records.filter(a => a.status !== 'draft') : []);
     const [loading, setLoading] = useState(!records);
-    const [tab, setTab] = useState('discounting');
-    const [f, setF] = useState({ ...EMPTY_FILTERS, status: initialStatus });
+    const [tab, setTab] = useState(initialTab || 'discounting');
+    const [f, setF] = useState(() => {
+        const preset = Object.fromEntries(
+            Object.entries(initialFilters || {}).filter(([k, v]) => k in EMPTY_FILTERS && v));
+        return { ...EMPTY_FILTERS, status: initialStatus, ...preset };
+    });
     const [selected, setSelected] = useState(null);
     const [exporting, setExporting] = useState(false);
 

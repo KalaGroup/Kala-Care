@@ -19,7 +19,7 @@ import * as XLSX from 'xlsx';
 import EmpQuery from '../components/EmpQuery';
 import AdminQueries from '../components/AdminQueries';
 import SeUidMaster from '../components/SeUidMaster';
-import { isAopRightsAdmin, AOP_ADMIN_IDS, AOP_TABS, PMS_PAGES, ANNUAL_TABS } from '../utils/pagePermission';
+import { isAopRightsAdmin, AOP_ADMIN_IDS, AOP_TABS, PMS_PAGES, ANNUAL_TABS, IMPORT_FILE_TYPES } from '../utils/pagePermission';
 
 const themeColor = '#2f3192';
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL;
@@ -2072,10 +2072,10 @@ const Profile = () => {
 
     // Grant/revoke a per-page permission for a user. Master Admin only —
     // except PMS, which only the PMS/AOP rights admins may hand out.
-    // page is 'part_detail' | 'mom' | 'approval' | 'pms' | 'quotation_tracker'.
+    // page is 'part_detail' | 'mom' | 'approval' | 'pms' | 'quotation_tracker' | 'import'.
     const handleTogglePageAccess = async (id, page, currentStatus) => {
         const label = { part_detail: 'Part Detail Info', approval: 'Note For Approval', quotation_tracker: 'Open Quotation Tracker',
-            pms: 'PMS' }[page] || 'MOM Tracking';
+            pms: 'PMS', import: 'Data Upload' }[page] || 'MOM Tracking';
         if (!isMasterAdmin || (page === 'pms' && !canGrantPms)) {
             Swal.fire({
                 title: 'Access Denied',
@@ -2108,7 +2108,8 @@ const Profile = () => {
                         part_detail: 'can_access_part_detail',
                         approval: 'can_access_approval',
                         pms: 'can_access_pms',
-                        quotation_tracker: 'can_access_quotation_tracker'
+                        quotation_tracker: 'can_access_quotation_tracker',
+                        import: 'can_access_import'
                     }[page] || 'can_access_mom';
                     const next = { ...editingUser, [field]: !currentStatus };
                     // Revoking PMS drops the AOP rights — and the per-tab
@@ -2118,6 +2119,11 @@ const Profile = () => {
                         next.aop_tabs = null;
                         next.pms_pages = null;
                         next.annual_tabs = null;
+                    }
+                    // Revoking Data Upload drops its per-file scoping too
+                    // (server does the same).
+                    if (page === 'import' && currentStatus) {
+                        next.import_files = null;
                     }
                     setEditingUser(next);
                 }
@@ -2244,6 +2250,53 @@ const Profile = () => {
             .filter((pg) => (pg.key === pageKey ? !pmsPageOn(emp, pg.key) : pmsPageOn(emp, pg.key)))
             .map((pg) => pg.key);
         savePmsPages(emp.id, next);
+    };
+
+    // WHICH files a user may upload on the Data Upload page. The stored list is
+    // null for users who were never scoped — they may upload every file — so
+    // rows are read through importFileOn() and the whole list is sent on every
+    // change (same shape as the PMS pages picker above). Master Admin only.
+    const importFileOn = (emp, fileType) => {
+        if (!emp || !emp.can_access_import) return false;
+        const list = emp.import_files;
+        if (list === undefined || list === null) return true;   // never scoped = all files
+        return Array.isArray(list) && list.includes(fileType);
+    };
+
+    // files === null clears the scoping (back to "every file").
+    const saveImportFiles = async (id, files) => {
+        try {
+            const response = await axios.put(`${API_BASE_URL}/users/employees/${id}/import-files`,
+                { files },
+                { headers: { 'user-id': user.user_id } }
+            );
+
+            if (response.data.success) {
+                showToast('success', response.data.message);
+                await fetchEmployees();
+                if (editingUser && editingUser.id === id) {
+                    setEditingUser({
+                        ...editingUser,
+                        import_files: response.data.employee?.import_files ?? null
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Set Data Upload files error:', err);
+            Swal.fire({
+                title: 'Error!',
+                text: err.response?.data?.detail || 'Failed to update the Data Upload files',
+                icon: 'error',
+                confirmButtonColor: '#2f3192'
+            });
+        }
+    };
+
+    // One row toggled — send the full list, same as the PMS picker.
+    const handleToggleImportFile = (emp, fileType) => {
+        const next = IMPORT_FILE_TYPES
+            .filter((ft) => (ft === fileType ? !importFileOn(emp, ft) : importFileOn(emp, ft)));
+        saveImportFiles(emp.id, next);
     };
 
     // WHICH sheets of the Annual Reports page a user gets. That page is four
@@ -3963,6 +4016,98 @@ const Profile = () => {
                                             </div>
                                         )}
 
+                                        {/* Data Upload page (Engagement Masters) — offered for
+                                            branch admins and employees only (the Master Admin
+                                            always has the page). Once granted, the file picker
+                                            below narrows WHICH files this user may upload. */}
+                                        {isMasterAdmin && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id
+                                            && ['branch_admin', 'employee'].includes(editingUser.role) && (
+                                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg max-sm:flex-wrap max-sm:gap-2">
+                                                <div className="flex items-center space-x-3">
+                                                    <FaBuilding className={`text-sm ${editingUser.can_access_import ? 'text-emerald-500' : 'text-gray-400'}`} />
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">Data Upload Access</p>
+                                                        <p className="text-xs text-black">Show the Data - Upload page (Engagement Masters). Once granted, pick below which files this user may upload</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleTogglePageAccess(editingUser.id, 'import', editingUser.can_access_import)}
+                                                    disabled={loading}
+                                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${editingUser.can_access_import
+                                                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                        } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    {editingUser.can_access_import ? 'Revoke' : 'Grant'}
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* WHICH files that user may upload on the Data Upload
+                                            page. Only shown once the access above is granted —
+                                            same shape as the PMS Pages picker below. */}
+                                        {isMasterAdmin && editingUser.user_id !== MASTER_ADMIN_ID && editingUser.user_id !== user.user_id
+                                            && ['branch_admin', 'employee'].includes(editingUser.role)
+                                            && editingUser.can_access_import && (
+                                            <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+                                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                    <div>
+                                                        <p className="text-xs font-medium text-black">Data Upload — Files</p>
+                                                        <p className="text-xs text-black">
+                                                            Pick the files this user may upload. Every other file stays blocked for them.
+                                                            {editingUser.import_files === null || editingUser.import_files === undefined
+                                                                ? ' Right now every file is allowed.'
+                                                                : ` ${(editingUser.import_files || []).length} of ${IMPORT_FILE_TYPES.length} files selected.`}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => saveImportFiles(editingUser.id, null)}
+                                                            disabled={loading}
+                                                            title="Allow every file on the Data Upload page"
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            All files
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => saveImportFiles(editingUser.id, [])}
+                                                            disabled={loading}
+                                                            title="Block every file — the page opens but nothing can be uploaded"
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            Clear all
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {/* One file per row — same shape as the PMS pickers. */}
+                                                <div className="grid grid-cols-1 gap-1.5">
+                                                    {IMPORT_FILE_TYPES.map((ft) => {
+                                                        const on = importFileOn(editingUser, ft);
+                                                        return (
+                                                            <div key={ft}
+                                                                className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border bg-white ${on ? 'border-emerald-200' : 'border-gray-200'}`}>
+                                                                <span className="text-xs text-black">{ft}</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleToggleImportFile(editingUser, ft)}
+                                                                    disabled={loading}
+                                                                    className={`px-2.5 py-1 rounded-lg text-xs font-medium flex-shrink-0 transition-colors ${on
+                                                                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                                        } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                >
+                                                                    {on ? 'Allow' : "Don't allow"}
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {/* PMS module — one flag for all its pages. Only the
                                             PMS/AOP rights admins (VITE_PMS_AOP_ADMIN_IDS) hand
                                             this out; other Master Admins never see the block. */}
@@ -3973,7 +4118,7 @@ const Profile = () => {
                                                     <FaBuilding className={`text-sm ${editingUser.can_access_pms ? 'text-emerald-500' : 'text-gray-400'}`} />
                                                     <div>
                                                         <p className="text-xs font-medium text-black">PMS Access</p>
-                                                        <p className="text-xs text-black">Show the PMS pages (Sales &amp; Labour Report, Employee Productivity, SR Allocation)</p>
+                                                        <p className="text-xs text-black">Show the PMS pages (Part &amp; Labour Sale, Employee Productivity, SR Allocation)</p>
                                                     </div>
                                                 </div>
                                                 <button

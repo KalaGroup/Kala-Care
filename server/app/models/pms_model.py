@@ -268,6 +268,19 @@ class PmsSeUid(Base):
     src_maxttr = Column(Boolean, nullable=False, default=False)
     src_lms = Column(Boolean, nullable=False, default=False)
     src_efsr = Column(Boolean, nullable=False, default=False)
+    # Set by the HR 'Attendance Summary' import (PmsAttendanceSummary). It is the
+    # only source that is not a KOEL data file, so it earns its own flag: a row
+    # carrying ONLY this badge is somebody HR employs who has never appeared in
+    # MaxTTR / LMS / EFSR — a new joiner, or one of the non-engineer staff the
+    # attendance file also lists.
+    src_attendance = Column(Boolean, nullable=False, default=False)
+    # A HUMAN HAS SETTLED THIS BRANCH. Set when the branch was chosen on the
+    # Profile page — by hand in the Edit dialog, or in the branch review the HR
+    # attendance import opens when its file disagrees with this row. Once it is
+    # set, a monthly HR export that says something else is neither applied nor
+    # asked about again: the business has already answered that question, and a
+    # dialog that keeps re-asking it is one nobody reads.
+    branch_pinned = Column(Boolean, nullable=False, default=False)
     created_by = Column(String(50), nullable=True)
     updated_by = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_ist)
@@ -718,6 +731,169 @@ class PmsServiceLoadSeCount(Base):
     id = Column(Integer, primary_key=True, index=True)
     branch_id = Column(String(60), nullable=False, unique=True, index=True)
     se_count = Column(Integer, nullable=True)
+    created_by = Column(String(50), nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
+
+
+class PmsAttendanceSummary(Base):
+    """HR's monthly 'Attendance Summary' file, one row per employee per month.
+
+    The file is uploaded from the SE UID Master (Profile page) because it is the
+    only export that carries BOTH identities: E Code — the KalaCare login id in
+    dbo.users — and UID, the Service Engineer UID the PMS reports attribute LMS
+    leads by. Importing it therefore does two jobs: it stores the month's
+    attendance here, and it fills the blanks in pms_se_uid_master (see
+    import_attendance_summary).
+
+    The file itself carries NO month column — 'July' lives only in its name — so
+    the period is chosen by hand at import time and stored as period_month
+    ('YYYY-MM'). Re-uploading a month REPLACES that month's rows and leaves every
+    other month alone, which is what makes a corrected re-export safe.
+
+    Counts are Float, not Integer: a half day is half a day.
+    """
+    __tablename__ = "pms_attendance_summary"
+    __table_args__ = (
+        # One row per employee per month — the upsert key of the import.
+        UniqueConstraint("period_month", "e_code", name="uq_pms_att_month_ecode"),
+        Index("ix_pms_att_month_branch", "period_month", "branch_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    period_month = Column(String(7), nullable=False, index=True)   # 'YYYY-MM'
+
+    # ---- identity ---------------------------------------------------------
+    e_code = Column(String(50), nullable=False, index=True)        # users.user_id
+    uid = Column(String(100), nullable=True, index=True)           # SE UID; the
+    # file writes 'UID Pending' / 'UID Hold' for a new joiner, which is stored as
+    # typed but never offered to the SE UID master as a UID.
+    employee_name = Column(String(200), nullable=True)
+    name_key = Column(String(200), nullable=True, index=True)      # squashed name
+    joining_date = Column(Date, nullable=True)
+
+    # Branch as the file spells it, plus the KALA branch id it resolves to.
+    # Both are kept: 'Bidar' and 'Raichur' are in the HR file but are not KALA
+    # branches, so they resolve to nothing and only the raw name survives.
+    branch = Column(String(120), nullable=True)
+    branch_id = Column(String(100), nullable=True, index=True)
+    designation = Column(String(120), nullable=True)
+
+    # ---- the month's figures, exactly the CURRENT file's columns ------------
+    # These ten, and only these ten: they are what 'Attendance <Month>' carries,
+    # and its trailing counts are exactly the totals of its own day cells.
+    #
+    # HALF DAY IS IN DAYS, not in occurrences. Two half days are stored as 1.0.
+    # That is the convention the old summary export used and it is kept, so a
+    # month uploaded from either file adds up the same way and days worked is
+    # present + out_door_duty + half_day with nothing halved twice.
+    #
+    # The older export also had Payable Days, Leave & Absent, LOP, Allowed
+    # Leave, Total Payable Days and an EmpStatus. HR does not send them now,
+    # nothing reads them, and they are gone from this model - the physical
+    # columns are still on the table, nullable, holding whatever that export
+    # last left in them.
+    total_days_month = Column(Float, nullable=True)
+    present = Column(Float, nullable=True)
+    out_door_duty = Column(Float, nullable=True)
+    half_day = Column(Float, nullable=True)
+    absent = Column(Float, nullable=True)
+    leave = Column(Float, nullable=True)
+    weekly_off = Column(Float, nullable=True)
+    c_off = Column(Float, nullable=True)
+    holiday = Column(Float, nullable=True)
+    na = Column(Float, nullable=True)
+
+    created_by = Column(String(50), nullable=True)
+    updated_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_ist)
+
+
+class PmsAttendanceDay(Base):
+    """HR's DAY-WISE attendance — one row per employee per calendar day.
+
+    The 'Attendance <Month>' export (Code, UID, Employee Name, Joining Date,
+    Branch, Designation, Total Days Month, D_01 .. D_31, then a count per
+    status). It is the same 142 employees as the 'Attendance Summary' export of
+    the same month and its trailing counts are exactly the totals of its own day
+    cells - checked over 142 employees x 9 counts, 0 mismatches - so this file
+    ALONE can carry a month: the import derives the month's summary row from
+    these days rather than asking for the second file.
+
+    ONE ROW PER DAY rather than 31 columns per employee: the reports read it by
+    date (SE Performance shows the selected month day by day), a month is
+    ~4,400 rows, and a file with a different number of day columns needs no
+    migration.
+
+    status is the file's OWN word, stored verbatim ('Outdoor Duty', 'Weekly
+    Off', 'C Off'), and code is the one letter the reports read:
+        P present     O out-door duty   H half day
+        L leave       A absent
+        W weekly off  C c-off           Y holiday
+        -  no data ('NA', or a blank cell)
+    Both are kept on purpose: the CLASSIFICATION is a business rule (leave and
+    absent are the only two that cost a day; present and out-door duty both
+    earn one) and a rule that changes must be re-derivable from what the file
+    actually said, without a re-upload.
+
+    Re-uploading a month REPLACES that month's rows and leaves every other
+    month alone - the same contract as pms_attendance_summary.
+    """
+    __tablename__ = "pms_attendance_day"
+    __table_args__ = (
+        # one row per employee per day is the file's own grain
+        UniqueConstraint("work_date", "e_code", name="uq_pms_attday_date_ecode"),
+        Index("ix_pms_attday_month", "period_month"),
+        Index("ix_pms_attday_uid", "uid"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    period_month = Column(String(7), nullable=False, index=True)   # 'YYYY-MM'
+    work_date = Column(Date, nullable=False, index=True)
+
+    # ---- identity, the same three keys the summary is joined on ------------
+    e_code = Column(String(50), nullable=False, index=True)        # users.user_id
+    uid = Column(String(100), nullable=True, index=True)           # SE UID
+    employee_name = Column(String(200), nullable=True)
+    name_key = Column(String(200), nullable=True, index=True)      # squashed name
+
+    # ---- the day itself ---------------------------------------------------
+    status = Column(String(40), nullable=True)                     # the file's word
+    code = Column(String(1), nullable=True, index=True)            # P O H L A W C Y -
+
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_ist)
+
+
+class PmsAttBranchAlias(Base):
+    """HR's OWN SPELLING of a branch -> the KALA branch it means.
+
+    HR's attendance export names the branch in its own words, and those words
+    are not always a KALA branch name: 'Gulberga' for Gulbarga, a shortened
+    'Ch. Sambhaji Nagar Br', a branch renamed on their side and not on ours.
+    Until now such a name resolved to nothing, the engineers in it were left
+    without a branch, and the import said so in one lumped sentence nobody
+    could act on.
+
+    This is where the answer is kept. The branch review that opens after an HR
+    upload asks WHICH KALA branch a name it could not resolve means, and the
+    answer is stored here once: every later month resolves the same spelling on
+    its own (see _att_branch_id). A hard-coded alias list (_ATT_BRANCH_ALIAS)
+    is still consulted after this table, so the spellings already known keep
+    working with nothing typed.
+
+    name_key is the same squashed form _branch_name_key builds, so the dealer
+    prefix and the punctuation cannot split one spelling into two rows.
+    """
+    __tablename__ = "pms_att_branch_alias"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # squashed, letters and digits only — the lookup key
+    name_key = Column(String(200), nullable=False, unique=True, index=True)
+    hr_name = Column(String(200), nullable=True)      # as the file spells it
+    branch_id = Column(String(100), nullable=False)   # e.g. '420435_1'
     created_by = Column(String(50), nullable=True)
     updated_by = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_ist)

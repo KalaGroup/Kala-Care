@@ -230,6 +230,15 @@ FILE_KNOWN_COLUMNS = {
 # Known alternate spellings that flexible matching alone cannot bridge
 # (word-level renames, not just case/space differences).
 FILE_COLUMN_ALIASES = {
+    'Asset Detailed Report': {
+        # EMISSION NORM is a FIXED column: it is the ONLY import that carries the
+        # norm, and the engine model -> attachment master behind the Welcome
+        # Letter and the drive Letter Master reads it straight off asset_detailed.
+        # KOEL exports spell it with a double m often enough that the header must
+        # never be allowed to fall through to extra_data.
+        'EMISSION NORM': ['EMMISSION NORM', 'EMISSION NORMS', 'EMMISSION NORMS',
+                          'EMISSION'],
+    },
     'Open SR Load Report': {
         'Oil Change Flg': ['Oil Change Flag'],
         'Engine Serial#': ['Engine Serial No', 'Engine Serial Number'],

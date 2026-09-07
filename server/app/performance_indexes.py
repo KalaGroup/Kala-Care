@@ -120,6 +120,12 @@ INDEX_STATEMENTS = [
     END
     """,
 
+    # IX_open_sr_load_reports_instance_subtype — the Welcome Letter's "is this
+    # instance still a CC?" EXISTS, run once per listed entry.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_open_sr_load_reports_instance_subtype' AND object_id = OBJECT_ID('dbo.open_sr_load_reports')) CREATE NONCLUSTERED INDEX IX_open_sr_load_reports_instance_subtype ON dbo.open_sr_load_reports (instance_id, sr_sub_type);",
+    # IX_asset_detailed_instance_commissioning — the Welcome Letter's 3-month
+    # age check reads the commissioning date straight off the index.
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_asset_detailed_instance_commissioning' AND object_id = OBJECT_ID('dbo.asset_detailed')) CREATE NONCLUSTERED INDEX IX_asset_detailed_instance_commissioning ON dbo.asset_detailed (instance_id) INCLUDE (commissioning_date, kva_rating, branch_id, branch_name);",
     # IX_open_sr_load_reports_sr_due_date
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_open_sr_load_reports_sr_due_date' AND object_id = OBJECT_ID('dbo.open_sr_load_reports')) CREATE NONCLUSTERED INDEX IX_open_sr_load_reports_sr_due_date ON dbo.open_sr_load_reports (sr_due_date DESC);",
     # IX_letter_send_records_fy_format_type
@@ -448,6 +454,20 @@ def ensure_performance_indexes(engine):
 # re-upload. Idempotent: after the column exists, the whole entry is skipped.
 # ---------------------------------------------------------------------------
 COLUMN_STATEMENTS = [
+    # SE UID Master: the branch has been settled by a human, so no monthly HR
+    # export may change it or re-open the branch review over it.
+    {
+        "name": "pms_se_uid_master.branch_pinned",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_se_uid_master') AND name = 'branch_pinned'",
+        "add": "ALTER TABLE dbo.pms_se_uid_master ADD branch_pinned BIT NOT NULL CONSTRAINT DF_pms_se_uid_branch_pinned DEFAULT 0",
+    },
+    # SE UID Master: which rows came from the HR 'Attendance Summary' upload.
+    # NOT NULL with a default so every existing row reads as 'not from HR'.
+    {
+        "name": "pms_se_uid_master.src_attendance",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pms_se_uid_master') AND name = 'src_attendance'",
+        "add": "ALTER TABLE dbo.pms_se_uid_master ADD src_attendance BIT NOT NULL CONSTRAINT DF_pms_se_uid_src_attendance DEFAULT 0",
+    },
     # AMC & Bandhan Projection (Annual Reports): the counted figures the report
     # now KEEPS, so a closed year stops decaying once it has been seen, and the
     # best-month high-water mark it raises as branches beat it.
@@ -848,6 +868,19 @@ COLUMN_STATEMENTS = [
         "add": "ALTER TABLE dbo.users ADD can_access_quotation_tracker BIT NOT NULL CONSTRAINT DF_users_can_access_quotation_tracker DEFAULT 0",
     },
     {
+        # Data Upload page (Engagement Masters) for a branch admin / employee.
+        "name": "users.can_access_import",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'can_access_import'",
+        "add": "ALTER TABLE dbo.users ADD can_access_import BIT NOT NULL CONSTRAINT DF_users_can_access_import DEFAULT 0",
+    },
+    {
+        # WHICH files that user may upload there: JSON list of file-type names.
+        # NULL = every file (how the flag behaves unscoped); [] = none.
+        "name": "users.import_files",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'import_files'",
+        "add": "ALTER TABLE dbo.users ADD import_files NVARCHAR(2000) NULL",
+    },
+    {
         # Employee email — approval notification emails go here
         "name": "users.email",
         "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'email'",
@@ -1196,6 +1229,46 @@ COLUMN_STATEMENTS = [
         "name": "welcome_letter_entries.attachments_sent",
         "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.welcome_letter_entries') AND name = 'attachments_sent'",
         "add": "ALTER TABLE dbo.welcome_letter_entries ADD attachments_sent INT NULL",
+    },
+    {
+        # The letter's subject line, split out of format_type_name so renaming a
+        # format no longer rewrites the subject of the letters sent from it.
+        "name": "campaign_letter_formats.subject",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.campaign_letter_formats') AND name = 'subject'",
+        "add": "ALTER TABLE dbo.campaign_letter_formats ADD subject NVARCHAR(MAX) NULL",
+        # keep every existing format printing the subject it prints today
+        "backfill": "UPDATE dbo.campaign_letter_formats SET subject = format_type_name WHERE subject IS NULL",
+    },
+    {
+        # The paragraph printed below the Authorized Signatory line.
+        "name": "campaign_letter_formats.signature_para",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.campaign_letter_formats') AND name = 'signature_para'",
+        "add": "ALTER TABLE dbo.campaign_letter_formats ADD signature_para NVARCHAR(MAX) NULL",
+    },
+    {
+        # Which boxes the sender may still edit while sending. NULL reads as
+        # "everything editable", which is how every existing format behaves.
+        "name": "campaign_letter_formats.editable_fields",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.campaign_letter_formats') AND name = 'editable_fields'",
+        "add": "ALTER TABLE dbo.campaign_letter_formats ADD editable_fields NVARCHAR(MAX) NULL",
+    },
+    {
+        # Per letter format: does it also attach the file mapped to the
+        # customer's engine model? NOT NULL default 0 — an existing format must
+        # not silently start sending a file it never sent before.
+        "name": "campaign_letter_formats.use_model_attachments",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.campaign_letter_formats') AND name = 'use_model_attachments'",
+        "add": "ALTER TABLE dbo.campaign_letter_formats ADD use_model_attachments BIT NOT NULL CONSTRAINT DF_clf_use_model_att DEFAULT 0",
+    },
+    {
+        # Master attachments split into the ones EVERY letter gets (DEFAULT) and
+        # the ones an engine model earns through welcome_letter_model_rules
+        # (MODEL). Everything uploaded before the split was a default, so the
+        # backfill stamps the existing rows rather than leaving them NULL.
+        "name": "welcome_letter_attachments.kind",
+        "exists": "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.welcome_letter_attachments') AND name = 'kind'",
+        "add": "ALTER TABLE dbo.welcome_letter_attachments ADD kind NVARCHAR(20) NULL",
+        "backfill": "UPDATE dbo.welcome_letter_attachments SET kind = 'DEFAULT' WHERE kind IS NULL",
     },
     {
         # MOM rows — when the point's definition was last rewritten by a Master

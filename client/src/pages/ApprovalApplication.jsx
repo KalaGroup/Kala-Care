@@ -11,7 +11,9 @@ const BranchApprovalView = lazy(() => import('../components/approval/BranchAppro
 const HODApprovalView = lazy(() => import('../components/approval/HODApprovalView'));
 const COOApprovalView = lazy(() => import('../components/approval/COOApprovalView'));
 const AuthorityMatrix = lazy(() => import('../components/approval/AuthorityMatrix'));
-const ApprovalReports = lazy(() => import('../components/approval/ApprovalReports'));
+// header "Reports" button → the analytics box (the four summary cards keep
+// opening the plain record-list popup from inside each view)
+const ApprovalInsights = lazy(() => import('../components/approval/ApprovalInsights'));
 
 const viewLoader = (
     <div className="flex items-center justify-center min-h-[40vh] text-sm text-gray-400">
@@ -268,7 +270,7 @@ export default function ApprovalApplication() {
             )}
             {showReports && (
                 <Suspense fallback={viewLoader}>
-                    <ApprovalReports onClose={() => setShowReports(false)} />
+                    <ApprovalInsights onClose={() => setShowReports(false)} />
                 </Suspense>
             )}
         </div>

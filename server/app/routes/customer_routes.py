@@ -78,7 +78,7 @@ def check_export_permission(user_id: str, db: Session):
 # ==================== Customer Export Endpoint ====================
 
 @router.get("/export")
-async def export_customers(
+def export_customers(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -115,7 +115,7 @@ async def export_customers(
 # ==================== AMC Agreements Export Endpoint ====================
 
 @router.get("/amc-agreements/export")
-async def export_amc_agreements(
+def export_amc_agreements(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -152,7 +152,7 @@ async def export_amc_agreements(
 # ==================== Asset Detailed Export Endpoint ====================
 
 @router.get("/asset-detailed/export")
-async def export_asset_detailed(
+def export_asset_detailed(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -189,7 +189,7 @@ async def export_asset_detailed(
 # ==================== Asset Services Export Endpoint ====================
 
 @router.get("/asset-services/export")
-async def export_asset_services(
+def export_asset_services(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -226,7 +226,7 @@ async def export_asset_services(
 # ==================== Anubandhan Plus Export Endpoint ====================
 
 @router.get("/anubandhan-plus/export")
-async def export_anubandhan_plus(
+def export_anubandhan_plus(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -263,7 +263,7 @@ async def export_anubandhan_plus(
 # ==================== Anubandhan Export Endpoint ====================
 
 @router.get("/anubandhan/export")
-async def export_anubandhan(
+def export_anubandhan(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -300,7 +300,7 @@ async def export_anubandhan(
 # ==================== Bandhan Plus Export Endpoint ====================
 
 @router.get("/bandhan-plus/export")
-async def export_bandhan_plus(
+def export_bandhan_plus(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -337,7 +337,7 @@ async def export_bandhan_plus(
 # ==================== Pulse Quotations Export Endpoint ====================
 
 @router.get("/pulse-quotations/export")
-async def export_pulse_quotations(
+def export_pulse_quotations(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -374,7 +374,7 @@ async def export_pulse_quotations(
 # ==================== Regular Bandhan Export Endpoint ====================
 
 @router.get("/regular-bandhan/export")
-async def export_regular_bandhan(
+def export_regular_bandhan(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -411,7 +411,7 @@ async def export_regular_bandhan(
 # ==================== LMS Data Export Endpoint ====================
 
 @router.get("/lms-data/export")
-async def export_lms_data(
+def export_lms_data(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -448,7 +448,7 @@ async def export_lms_data(
 # ==================== Open SR Load Reports Export Endpoint ====================
 
 @router.get("/open-sr-load-reports/export")
-async def export_open_sr_load_reports(
+def export_open_sr_load_reports(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -490,7 +490,7 @@ async def export_open_sr_load_reports(
 # ==================== Customer Endpoints ====================
 
 @router.get("/", response_model=List[Customer])
-async def get_customers(
+def get_customers(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1),
@@ -513,7 +513,7 @@ async def get_customers(
     return results
 
 @router.get("/with-summary", response_model=List[dict])
-async def get_customers_with_summary(
+def get_customers_with_summary(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -535,7 +535,7 @@ async def get_customers_with_summary(
 
 
 @router.get("/instance/{instance_id}/complete-data", response_model=dict)
-async def get_customer_complete_data(
+def get_customer_complete_data(
     instance_id: str,
     include_closed: bool = Query(False, description="Also return Open SRs that are already closed in the MaxTTR file. Customers Data Hub only — Drive / Non-Drive pages use the default."),
     db: Session = Depends(get_db)
@@ -549,21 +549,21 @@ async def get_customer_complete_data(
 
 
 @router.get("/{customer_id}", response_model=Customer)
-async def get_customer(customer_id: int, db: Session = Depends(get_db)):
+def get_customer(customer_id: int, db: Session = Depends(get_db)):
     """Get single customer by ID"""
     controller = CustomerController(db)
     return controller.get_customer(customer_id)
 
 
 @router.post("/", response_model=Customer, status_code=status.HTTP_201_CREATED)
-async def create_customer(customer: CustomerCreate, db: Session = Depends(get_db)):
+def create_customer(customer: CustomerCreate, db: Session = Depends(get_db)):
     """Create new customer"""
     controller = CustomerController(db)
     return controller.create_customer(customer)
 
 
 @router.put("/{customer_id}", response_model=Customer)
-async def update_customer(
+def update_customer(
     customer_id: int, 
     customer: CustomerUpdate, 
     db: Session = Depends(get_db)
@@ -574,14 +574,14 @@ async def update_customer(
 
 
 @router.delete("/{customer_id}", response_model=MessageResponse)
-async def delete_customer(customer_id: int, db: Session = Depends(get_db)):
+def delete_customer(customer_id: int, db: Session = Depends(get_db)):
     """Delete customer"""
     controller = CustomerController(db)
     return controller.delete_customer(customer_id)
 
 
 @router.post("/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_customers(
+def bulk_delete_customers(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -600,7 +600,7 @@ async def bulk_delete_customers(
 # ==================== AMC Agreement Endpoints ====================
 
 @router.get("/amc-agreements/", response_model=List[AMCAgreement])
-async def get_amc_agreements(
+def get_amc_agreements(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -622,21 +622,21 @@ async def get_amc_agreements(
 
 
 @router.get("/amc-agreements/{agreement_id}", response_model=AMCAgreement)
-async def get_amc_agreement(agreement_id: int, db: Session = Depends(get_db)):
+def get_amc_agreement(agreement_id: int, db: Session = Depends(get_db)):
     """Get single AMC agreement by ID"""
     controller = CustomerController(db)
     return controller.get_amc_agreement(agreement_id)
 
 
 @router.post("/amc-agreements/", response_model=AMCAgreement, status_code=status.HTTP_201_CREATED)
-async def create_amc_agreement(agreement: AMCAgreementCreate, db: Session = Depends(get_db)):
+def create_amc_agreement(agreement: AMCAgreementCreate, db: Session = Depends(get_db)):
     """Create new AMC agreement"""
     controller = CustomerController(db)
     return controller.create_amc_agreement(agreement)
 
 
 @router.put("/amc-agreements/{agreement_id}", response_model=AMCAgreement)
-async def update_amc_agreement(
+def update_amc_agreement(
     agreement_id: int,
     agreement: AMCAgreementUpdate,
     db: Session = Depends(get_db)
@@ -647,14 +647,14 @@ async def update_amc_agreement(
 
 
 @router.delete("/amc-agreements/{agreement_id}", response_model=MessageResponse)
-async def delete_amc_agreement(agreement_id: int, db: Session = Depends(get_db)):
+def delete_amc_agreement(agreement_id: int, db: Session = Depends(get_db)):
     """Delete AMC agreement"""
     controller = CustomerController(db)
     return controller.delete_amc_agreement(agreement_id)
 
 
 @router.post("/amc-agreements/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_amc_agreements(
+def bulk_delete_amc_agreements(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -666,7 +666,7 @@ async def bulk_delete_amc_agreements(
 # ==================== Asset Detailed Endpoints ====================
 
 @router.get("/asset-detailed/", response_model=List[AssetDetailed])
-async def get_asset_detailed(
+def get_asset_detailed(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -688,21 +688,21 @@ async def get_asset_detailed(
 
 
 @router.get("/asset-detailed/{asset_id}", response_model=AssetDetailed)
-async def get_asset_detailed_record(asset_id: int, db: Session = Depends(get_db)):
+def get_asset_detailed_record(asset_id: int, db: Session = Depends(get_db)):
     """Get single asset detailed record by ID"""
     controller = CustomerController(db)
     return controller.get_asset_detailed_record(asset_id)
 
 
 @router.post("/asset-detailed/", response_model=AssetDetailed, status_code=status.HTTP_201_CREATED)
-async def create_asset_detailed(asset: AssetDetailedCreate, db: Session = Depends(get_db)):
+def create_asset_detailed(asset: AssetDetailedCreate, db: Session = Depends(get_db)):
     """Create new asset detailed record"""
     controller = CustomerController(db)
     return controller.create_asset_detailed(asset)
 
 
 @router.put("/asset-detailed/{asset_id}", response_model=AssetDetailed)
-async def update_asset_detailed(
+def update_asset_detailed(
     asset_id: int,
     asset: AssetDetailedUpdate,
     db: Session = Depends(get_db)
@@ -713,14 +713,14 @@ async def update_asset_detailed(
 
 
 @router.delete("/asset-detailed/{asset_id}", response_model=MessageResponse)
-async def delete_asset_detailed(asset_id: int, db: Session = Depends(get_db)):
+def delete_asset_detailed(asset_id: int, db: Session = Depends(get_db)):
     """Delete asset detailed record"""
     controller = CustomerController(db)
     return controller.delete_asset_detailed(asset_id)
 
 
 @router.post("/asset-detailed/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_asset_detailed(
+def bulk_delete_asset_detailed(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -732,7 +732,7 @@ async def bulk_delete_asset_detailed(
 # ==================== Asset Service Endpoints ====================
 
 @router.get("/asset-services/", response_model=List[AssetService])
-async def get_asset_services(
+def get_asset_services(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -754,21 +754,21 @@ async def get_asset_services(
 
 
 @router.get("/asset-services/{service_id}", response_model=AssetService)
-async def get_asset_service(service_id: int, db: Session = Depends(get_db)):
+def get_asset_service(service_id: int, db: Session = Depends(get_db)):
     """Get single asset service by ID"""
     controller = CustomerController(db)
     return controller.get_asset_service(service_id)
 
 
 @router.post("/asset-services/", response_model=AssetService, status_code=status.HTTP_201_CREATED)
-async def create_asset_service(service: AssetServiceCreate, db: Session = Depends(get_db)):
+def create_asset_service(service: AssetServiceCreate, db: Session = Depends(get_db)):
     """Create new asset service"""
     controller = CustomerController(db)
     return controller.create_asset_service(service)
 
 
 @router.put("/asset-services/{service_id}", response_model=AssetService)
-async def update_asset_service(
+def update_asset_service(
     service_id: int,
     service: AssetServiceUpdate,
     db: Session = Depends(get_db)
@@ -779,14 +779,14 @@ async def update_asset_service(
 
 
 @router.delete("/asset-services/{service_id}", response_model=MessageResponse)
-async def delete_asset_service(service_id: int, db: Session = Depends(get_db)):
+def delete_asset_service(service_id: int, db: Session = Depends(get_db)):
     """Delete asset service"""
     controller = CustomerController(db)
     return controller.delete_asset_service(service_id)
 
 
 @router.post("/asset-services/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_asset_services(
+def bulk_delete_asset_services(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -798,7 +798,7 @@ async def bulk_delete_asset_services(
 # ==================== Anubandhan Plus Quote Endpoints ====================
 
 @router.get("/anubandhan-plus/", response_model=List[AnubandhanPlusQuote])
-async def get_anubandhan_plus_quotes(
+def get_anubandhan_plus_quotes(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -820,21 +820,21 @@ async def get_anubandhan_plus_quotes(
 
 
 @router.get("/anubandhan-plus/{quote_id}", response_model=AnubandhanPlusQuote)
-async def get_anubandhan_plus_quote(quote_id: int, db: Session = Depends(get_db)):
+def get_anubandhan_plus_quote(quote_id: int, db: Session = Depends(get_db)):
     """Get single Anubandhan Plus quote by ID"""
     controller = CustomerController(db)
     return controller.get_anubandhan_plus_quote(quote_id)
 
 
 @router.post("/anubandhan-plus/", response_model=AnubandhanPlusQuote, status_code=status.HTTP_201_CREATED)
-async def create_anubandhan_plus_quote(quote: AnubandhanPlusQuoteCreate, db: Session = Depends(get_db)):
+def create_anubandhan_plus_quote(quote: AnubandhanPlusQuoteCreate, db: Session = Depends(get_db)):
     """Create new Anubandhan Plus quote"""
     controller = CustomerController(db)
     return controller.create_anubandhan_plus_quote(quote)
 
 
 @router.put("/anubandhan-plus/{quote_id}", response_model=AnubandhanPlusQuote)
-async def update_anubandhan_plus_quote(
+def update_anubandhan_plus_quote(
     quote_id: int,
     quote: AnubandhanPlusQuoteUpdate,
     db: Session = Depends(get_db)
@@ -845,14 +845,14 @@ async def update_anubandhan_plus_quote(
 
 
 @router.delete("/anubandhan-plus/{quote_id}", response_model=MessageResponse)
-async def delete_anubandhan_plus_quote(quote_id: int, db: Session = Depends(get_db)):
+def delete_anubandhan_plus_quote(quote_id: int, db: Session = Depends(get_db)):
     """Delete Anubandhan Plus quote"""
     controller = CustomerController(db)
     return controller.delete_anubandhan_plus_quote(quote_id)
 
 
 @router.post("/anubandhan-plus/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_anubandhan_plus_quotes(
+def bulk_delete_anubandhan_plus_quotes(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -864,7 +864,7 @@ async def bulk_delete_anubandhan_plus_quotes(
 # ==================== Anubandhan Quote Endpoints ====================
 
 @router.get("/anubandhan/", response_model=List[AnubandhanQuote])
-async def get_anubandhan_quotes(
+def get_anubandhan_quotes(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -886,21 +886,21 @@ async def get_anubandhan_quotes(
 
 
 @router.get("/anubandhan/{quote_id}", response_model=AnubandhanQuote)
-async def get_anubandhan_quote(quote_id: int, db: Session = Depends(get_db)):
+def get_anubandhan_quote(quote_id: int, db: Session = Depends(get_db)):
     """Get single Anubandhan quote by ID"""
     controller = CustomerController(db)
     return controller.get_anubandhan_quote(quote_id)
 
 
 @router.post("/anubandhan/", response_model=AnubandhanQuote, status_code=status.HTTP_201_CREATED)
-async def create_anubandhan_quote(quote: AnubandhanQuoteCreate, db: Session = Depends(get_db)):
+def create_anubandhan_quote(quote: AnubandhanQuoteCreate, db: Session = Depends(get_db)):
     """Create new Anubandhan quote"""
     controller = CustomerController(db)
     return controller.create_anubandhan_quote(quote)
 
 
 @router.put("/anubandhan/{quote_id}", response_model=AnubandhanQuote)
-async def update_anubandhan_quote(
+def update_anubandhan_quote(
     quote_id: int,
     quote: AnubandhanQuoteUpdate,
     db: Session = Depends(get_db)
@@ -911,14 +911,14 @@ async def update_anubandhan_quote(
 
 
 @router.delete("/anubandhan/{quote_id}", response_model=MessageResponse)
-async def delete_anubandhan_quote(quote_id: int, db: Session = Depends(get_db)):
+def delete_anubandhan_quote(quote_id: int, db: Session = Depends(get_db)):
     """Delete Anubandhan quote"""
     controller = CustomerController(db)
     return controller.delete_anubandhan_quote(quote_id)
 
 
 @router.post("/anubandhan/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_anubandhan_quotes(
+def bulk_delete_anubandhan_quotes(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -930,7 +930,7 @@ async def bulk_delete_anubandhan_quotes(
 # ==================== Bandhan Plus Quote Endpoints ====================
 
 @router.get("/bandhan-plus/", response_model=List[BandhanPlusQuote])
-async def get_bandhan_plus_quotes(
+def get_bandhan_plus_quotes(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -952,21 +952,21 @@ async def get_bandhan_plus_quotes(
 
 
 @router.get("/bandhan-plus/{quote_id}", response_model=BandhanPlusQuote)
-async def get_bandhan_plus_quote(quote_id: int, db: Session = Depends(get_db)):
+def get_bandhan_plus_quote(quote_id: int, db: Session = Depends(get_db)):
     """Get single Bandhan Plus quote by ID"""
     controller = CustomerController(db)
     return controller.get_bandhan_plus_quote(quote_id)
 
 
 @router.post("/bandhan-plus/", response_model=BandhanPlusQuote, status_code=status.HTTP_201_CREATED)
-async def create_bandhan_plus_quote(quote: BandhanPlusQuoteCreate, db: Session = Depends(get_db)):
+def create_bandhan_plus_quote(quote: BandhanPlusQuoteCreate, db: Session = Depends(get_db)):
     """Create new Bandhan Plus quote"""
     controller = CustomerController(db)
     return controller.create_bandhan_plus_quote(quote)
 
 
 @router.put("/bandhan-plus/{quote_id}", response_model=BandhanPlusQuote)
-async def update_bandhan_plus_quote(
+def update_bandhan_plus_quote(
     quote_id: int,
     quote: BandhanPlusQuoteUpdate,
     db: Session = Depends(get_db)
@@ -977,14 +977,14 @@ async def update_bandhan_plus_quote(
 
 
 @router.delete("/bandhan-plus/{quote_id}", response_model=MessageResponse)
-async def delete_bandhan_plus_quote(quote_id: int, db: Session = Depends(get_db)):
+def delete_bandhan_plus_quote(quote_id: int, db: Session = Depends(get_db)):
     """Delete Bandhan Plus quote"""
     controller = CustomerController(db)
     return controller.delete_bandhan_plus_quote(quote_id)
 
 
 @router.post("/bandhan-plus/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_bandhan_plus_quotes(
+def bulk_delete_bandhan_plus_quotes(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -996,7 +996,7 @@ async def bulk_delete_bandhan_plus_quotes(
 # ==================== Pulse Quotation Endpoints ====================
 
 @router.get("/pulse-quotations/", response_model=List[PulseQuotation])
-async def get_pulse_quotations(
+def get_pulse_quotations(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1018,21 +1018,21 @@ async def get_pulse_quotations(
 
 
 @router.get("/pulse-quotations/{quote_id}", response_model=PulseQuotation)
-async def get_pulse_quotation(quote_id: int, db: Session = Depends(get_db)):
+def get_pulse_quotation(quote_id: int, db: Session = Depends(get_db)):
     """Get single Pulse quotation by ID"""
     controller = CustomerController(db)
     return controller.get_pulse_quotation(quote_id)
 
 
 @router.post("/pulse-quotations/", response_model=PulseQuotation, status_code=status.HTTP_201_CREATED)
-async def create_pulse_quotation(quote: PulseQuotationCreate, db: Session = Depends(get_db)):
+def create_pulse_quotation(quote: PulseQuotationCreate, db: Session = Depends(get_db)):
     """Create new Pulse quotation"""
     controller = CustomerController(db)
     return controller.create_pulse_quotation(quote)
 
 
 @router.put("/pulse-quotations/{quote_id}", response_model=PulseQuotation)
-async def update_pulse_quotation(
+def update_pulse_quotation(
     quote_id: int,
     quote: PulseQuotationUpdate,
     db: Session = Depends(get_db)
@@ -1043,14 +1043,14 @@ async def update_pulse_quotation(
 
 
 @router.delete("/pulse-quotations/{quote_id}", response_model=MessageResponse)
-async def delete_pulse_quotation(quote_id: int, db: Session = Depends(get_db)):
+def delete_pulse_quotation(quote_id: int, db: Session = Depends(get_db)):
     """Delete Pulse quotation"""
     controller = CustomerController(db)
     return controller.delete_pulse_quotation(quote_id)
 
 
 @router.post("/pulse-quotations/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_pulse_quotations(
+def bulk_delete_pulse_quotations(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1062,7 +1062,7 @@ async def bulk_delete_pulse_quotations(
 # ==================== Regular Bandhan Endpoints ====================
 
 @router.get("/regular-bandhan/", response_model=List[RegularBandhan])
-async def get_regular_bandhan(
+def get_regular_bandhan(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1084,21 +1084,21 @@ async def get_regular_bandhan(
 
 
 @router.get("/regular-bandhan/{record_id}", response_model=RegularBandhan)
-async def get_regular_bandhan_record(record_id: int, db: Session = Depends(get_db)):
+def get_regular_bandhan_record(record_id: int, db: Session = Depends(get_db)):
     """Get single Regular Bandhan record by ID"""
     controller = CustomerController(db)
     return controller.get_regular_bandhan_record(record_id)
 
 
 @router.post("/regular-bandhan/", response_model=RegularBandhan, status_code=status.HTTP_201_CREATED)
-async def create_regular_bandhan(record: RegularBandhanCreate, db: Session = Depends(get_db)):
+def create_regular_bandhan(record: RegularBandhanCreate, db: Session = Depends(get_db)):
     """Create new Regular Bandhan record"""
     controller = CustomerController(db)
     return controller.create_regular_bandhan(record)
 
 
 @router.put("/regular-bandhan/{record_id}", response_model=RegularBandhan)
-async def update_regular_bandhan(
+def update_regular_bandhan(
     record_id: int,
     record: RegularBandhanUpdate,
     db: Session = Depends(get_db)
@@ -1109,14 +1109,14 @@ async def update_regular_bandhan(
 
 
 @router.delete("/regular-bandhan/{record_id}", response_model=MessageResponse)
-async def delete_regular_bandhan(record_id: int, db: Session = Depends(get_db)):
+def delete_regular_bandhan(record_id: int, db: Session = Depends(get_db)):
     """Delete Regular Bandhan record"""
     controller = CustomerController(db)
     return controller.delete_regular_bandhan(record_id)
 
 
 @router.post("/regular-bandhan/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_regular_bandhan(
+def bulk_delete_regular_bandhan(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1128,7 +1128,7 @@ async def bulk_delete_regular_bandhan(
 # ==================== LMS Data Endpoints ====================
 
 @router.get("/lms-data/", response_model=List[LMSData])
-async def get_lms_data(
+def get_lms_data(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1150,21 +1150,21 @@ async def get_lms_data(
 
 
 @router.get("/lms-data/{record_id}", response_model=LMSData)
-async def get_lms_record(record_id: int, db: Session = Depends(get_db)):
+def get_lms_record(record_id: int, db: Session = Depends(get_db)):
     """Get single LMS record by ID"""
     controller = CustomerController(db)
     return controller.get_lms_record(record_id)
 
 
 @router.post("/lms-data/", response_model=LMSData, status_code=status.HTTP_201_CREATED)
-async def create_lms_record(record: LMSDataCreate, db: Session = Depends(get_db)):
+def create_lms_record(record: LMSDataCreate, db: Session = Depends(get_db)):
     """Create new LMS record"""
     controller = CustomerController(db)
     return controller.create_lms_record(record)
 
 
 @router.put("/lms-data/{record_id}", response_model=LMSData)
-async def update_lms_record(
+def update_lms_record(
     record_id: int,
     record: LMSDataUpdate,
     db: Session = Depends(get_db)
@@ -1175,14 +1175,14 @@ async def update_lms_record(
 
 
 @router.delete("/lms-data/{record_id}", response_model=MessageResponse)
-async def delete_lms_record(record_id: int, db: Session = Depends(get_db)):
+def delete_lms_record(record_id: int, db: Session = Depends(get_db)):
     """Delete LMS record"""
     controller = CustomerController(db)
     return controller.delete_lms_record(record_id)
 
 
 @router.post("/lms-data/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_lms_records(
+def bulk_delete_lms_records(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1194,7 +1194,7 @@ async def bulk_delete_lms_records(
 # ==================== Open SR Load Report Endpoints ====================
 
 @router.get("/open-sr-load-reports/", response_model=List[OpenSRLoadReport])
-async def get_open_sr_load_reports(
+def get_open_sr_load_reports(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1216,21 +1216,21 @@ async def get_open_sr_load_reports(
 
 
 @router.get("/open-sr-load-reports/{report_id}", response_model=OpenSRLoadReport)
-async def get_open_sr_load_report(report_id: int, db: Session = Depends(get_db)):
+def get_open_sr_load_report(report_id: int, db: Session = Depends(get_db)):
     """Get single Open SR Load Report by ID"""
     controller = CustomerController(db)
     return controller.get_open_sr_load_report(report_id)
 
 
 @router.post("/open-sr-load-reports/", response_model=OpenSRLoadReport, status_code=status.HTTP_201_CREATED)
-async def create_open_sr_load_report(report: OpenSRLoadReportCreate, db: Session = Depends(get_db)):
+def create_open_sr_load_report(report: OpenSRLoadReportCreate, db: Session = Depends(get_db)):
     """Create new Open SR Load Report"""
     controller = CustomerController(db)
     return controller.create_open_sr_load_report(report)
 
 
 @router.put("/open-sr-load-reports/{report_id}", response_model=OpenSRLoadReport)
-async def update_open_sr_load_report(
+def update_open_sr_load_report(
     report_id: int,
     report: OpenSRLoadReportUpdate,
     db: Session = Depends(get_db)
@@ -1241,14 +1241,14 @@ async def update_open_sr_load_report(
 
 
 @router.delete("/open-sr-load-reports/{report_id}", response_model=MessageResponse)
-async def delete_open_sr_load_report(report_id: int, db: Session = Depends(get_db)):
+def delete_open_sr_load_report(report_id: int, db: Session = Depends(get_db)):
     """Delete Open SR Load Report"""
     controller = CustomerController(db)
     return controller.delete_open_sr_load_report(report_id)
 
 
 @router.post("/open-sr-load-reports/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_open_sr_load_reports(
+def bulk_delete_open_sr_load_reports(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1260,7 +1260,7 @@ async def bulk_delete_open_sr_load_reports(
 # ==================== MaxTTR - Oil Change SR Zero Labour Flag Endpoints (legacy /open-sr-data paths) ====================
 
 @router.get("/open-sr-data/export")
-async def export_open_sr_data(
+def export_open_sr_data(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -1287,7 +1287,7 @@ async def export_open_sr_data(
 
 
 @router.get("/open-sr-data/")
-async def get_open_sr_data(
+def get_open_sr_data(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1305,14 +1305,14 @@ async def get_open_sr_data(
 
 
 @router.delete("/open-sr-data/{record_id}", response_model=MessageResponse)
-async def delete_open_sr_data(record_id: int, db: Session = Depends(get_db)):
+def delete_open_sr_data(record_id: int, db: Session = Depends(get_db)):
     """Delete one MaxTTR - Oil Change SR row"""
     controller = CustomerController(db)
     return controller.delete_open_sr_data(record_id)
 
 
 @router.post("/open-sr-data/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_open_sr_data(
+def bulk_delete_open_sr_data(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1324,7 +1324,7 @@ async def bulk_delete_open_sr_data(
 # ==================== Response Time & MaxTTR Endpoints ====================
 
 @router.get("/response-time-maxttr/export")
-async def export_response_time_maxttr(
+def export_response_time_maxttr(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -1351,7 +1351,7 @@ async def export_response_time_maxttr(
 
 
 @router.get("/response-time-maxttr/")
-async def get_response_time_maxttr(
+def get_response_time_maxttr(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1369,14 +1369,14 @@ async def get_response_time_maxttr(
 
 
 @router.delete("/response-time-maxttr/{record_id}", response_model=MessageResponse)
-async def delete_response_time_maxttr(record_id: int, db: Session = Depends(get_db)):
+def delete_response_time_maxttr(record_id: int, db: Session = Depends(get_db)):
     """Delete one Response Time & MaxTTR row"""
     controller = CustomerController(db)
     return controller.delete_response_time_maxttr(record_id)
 
 
 @router.post("/response-time-maxttr/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_response_time_maxttr(
+def bulk_delete_response_time_maxttr(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1389,7 +1389,7 @@ async def bulk_delete_response_time_maxttr(
 # Standalone report table — no instance_id link, no writes to customers.
 
 @router.get("/cdi-detail-report/export")
-async def export_cdi_detail_report(
+def export_cdi_detail_report(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -1416,7 +1416,7 @@ async def export_cdi_detail_report(
 
 
 @router.get("/cdi-detail-report/")
-async def get_cdi_detail_report(
+def get_cdi_detail_report(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1434,14 +1434,14 @@ async def get_cdi_detail_report(
 
 
 @router.delete("/cdi-detail-report/{record_id}", response_model=MessageResponse)
-async def delete_cdi_detail_report(record_id: int, db: Session = Depends(get_db)):
+def delete_cdi_detail_report(record_id: int, db: Session = Depends(get_db)):
     """Delete one CDI Detail Report row"""
     controller = CustomerController(db)
     return controller.delete_cdi_detail_report(record_id)
 
 
 @router.post("/cdi-detail-report/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_cdi_detail_report(
+def bulk_delete_cdi_detail_report(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1454,7 +1454,7 @@ async def bulk_delete_cdi_detail_report(
 # Standalone report table — no instance_id link, no writes to customers.
 
 @router.get("/efsr-report/export")
-async def export_efsr_report(
+def export_efsr_report(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -1481,7 +1481,7 @@ async def export_efsr_report(
 
 
 @router.get("/efsr-report/")
-async def get_efsr_report(
+def get_efsr_report(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1499,14 +1499,14 @@ async def get_efsr_report(
 
 
 @router.delete("/efsr-report/{record_id}", response_model=MessageResponse)
-async def delete_efsr_report(record_id: int, db: Session = Depends(get_db)):
+def delete_efsr_report(record_id: int, db: Session = Depends(get_db)):
     """Delete one EFSR Report row"""
     controller = CustomerController(db)
     return controller.delete_efsr_report(record_id)
 
 
 @router.post("/efsr-report/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_efsr_report(
+def bulk_delete_efsr_report(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1520,7 +1520,7 @@ async def bulk_delete_efsr_report(
 # so instance_id is resolved from LEAD SR NUMBER during the import.
 
 @router.get("/lms-insia/export")
-async def export_lms_insia(
+def export_lms_insia(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -1547,7 +1547,7 @@ async def export_lms_insia(
 
 
 @router.get("/lms-insia/")
-async def get_lms_insia(
+def get_lms_insia(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1565,14 +1565,14 @@ async def get_lms_insia(
 
 
 @router.delete("/lms-insia/{record_id}", response_model=MessageResponse)
-async def delete_lms_insia(record_id: int, db: Session = Depends(get_db)):
+def delete_lms_insia(record_id: int, db: Session = Depends(get_db)):
     """Delete one LMS Data from Insia row"""
     controller = CustomerController(db)
     return controller.delete_lms_insia(record_id)
 
 
 @router.post("/lms-insia/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_lms_insia(
+def bulk_delete_lms_insia(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1585,7 +1585,7 @@ async def bulk_delete_lms_insia(
 # Instance-linked table — the import also tops up the customers master.
 
 @router.get("/amc-expiry-planner/export")
-async def export_amc_expiry_planner(
+def export_amc_expiry_planner(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -1612,7 +1612,7 @@ async def export_amc_expiry_planner(
 
 
 @router.get("/amc-expiry-planner/")
-async def get_amc_expiry_planner(
+def get_amc_expiry_planner(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1630,14 +1630,14 @@ async def get_amc_expiry_planner(
 
 
 @router.delete("/amc-expiry-planner/{record_id}", response_model=MessageResponse)
-async def delete_amc_expiry_planner(record_id: int, db: Session = Depends(get_db)):
+def delete_amc_expiry_planner(record_id: int, db: Session = Depends(get_db)):
     """Delete one AMC Agreement Expiry Planner row"""
     controller = CustomerController(db)
     return controller.delete_amc_expiry_planner(record_id)
 
 
 @router.post("/amc-expiry-planner/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_amc_expiry_planner(
+def bulk_delete_amc_expiry_planner(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1650,7 +1650,7 @@ async def bulk_delete_amc_expiry_planner(
 # Instance-linked table — only its Service lines carry an Instance Id.
 
 @router.get("/all-invoice-report/export")
-async def export_all_invoice_report(
+def export_all_invoice_report(
     user_id: str = Header(...),
     db: Session = Depends(get_db)
 ):
@@ -1677,7 +1677,7 @@ async def export_all_invoice_report(
 
 
 @router.get("/all-invoice-report/")
-async def get_all_invoice_report(
+def get_all_invoice_report(
     response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=-1),  # Allow -1 for all records
@@ -1695,14 +1695,14 @@ async def get_all_invoice_report(
 
 
 @router.delete("/all-invoice-report/{record_id}", response_model=MessageResponse)
-async def delete_all_invoice_report(record_id: int, db: Session = Depends(get_db)):
+def delete_all_invoice_report(record_id: int, db: Session = Depends(get_db)):
     """Delete one All Invoice Detailed Report row"""
     controller = CustomerController(db)
     return controller.delete_all_invoice_report(record_id)
 
 
 @router.post("/all-invoice-report/bulk-delete", response_model=MessageResponse)
-async def bulk_delete_all_invoice_report(
+def bulk_delete_all_invoice_report(
     request: BulkDeleteRequest,
     db: Session = Depends(get_db)
 ):
@@ -1714,70 +1714,70 @@ async def bulk_delete_all_invoice_report(
 # ==================== Data Retrieval by Instance ID ====================
 
 @router.get("/instance/{instance_id}/amc-agreements", response_model=List[AMCAgreement])
-async def get_amc_agreements_by_instance(instance_id: str, db: Session = Depends(get_db)):
+def get_amc_agreements_by_instance(instance_id: str, db: Session = Depends(get_db)):
     """Get all AMC agreements for an instance"""
     controller = CustomerController(db)
     return controller.get_amc_agreements_by_instance(instance_id)
 
 
 @router.get("/instance/{instance_id}/asset-detailed", response_model=List[AssetDetailed])
-async def get_asset_detailed_by_instance(instance_id: str, db: Session = Depends(get_db)):
+def get_asset_detailed_by_instance(instance_id: str, db: Session = Depends(get_db)):
     """Get all asset detailed records for an instance"""
     controller = CustomerController(db)
     return controller.get_asset_detailed_by_instance(instance_id)
 
 
 @router.get("/instance/{instance_id}/asset-services", response_model=List[AssetService])
-async def get_asset_services_by_instance(instance_id: str, db: Session = Depends(get_db)):
+def get_asset_services_by_instance(instance_id: str, db: Session = Depends(get_db)):
     """Get all asset service records for an instance"""
     controller = CustomerController(db)
     return controller.get_asset_services_by_instance(instance_id)
 
 
 @router.get("/instance/{instance_id}/anubandhan-plus", response_model=List[AnubandhanPlusQuote])
-async def get_anubandhan_plus_by_instance(instance_id: str, db: Session = Depends(get_db)):
+def get_anubandhan_plus_by_instance(instance_id: str, db: Session = Depends(get_db)):
     """Get all Anubandhan Plus quotes for an instance"""
     controller = CustomerController(db)
     return controller.get_anubandhan_plus_quotes_by_instance(instance_id)
 
 
 @router.get("/instance/{instance_id}/anubandhan", response_model=List[AnubandhanQuote])
-async def get_anubandhan_by_instance(instance_id: str, db: Session = Depends(get_db)):
+def get_anubandhan_by_instance(instance_id: str, db: Session = Depends(get_db)):
     """Get all Anubandhan quotes for an instance"""
     controller = CustomerController(db)
     return controller.get_anubandhan_quotes_by_instance(instance_id)
 
 
 @router.get("/instance/{instance_id}/bandhan-plus", response_model=List[BandhanPlusQuote])
-async def get_bandhan_plus_by_instance(instance_id: str, db: Session = Depends(get_db)):
+def get_bandhan_plus_by_instance(instance_id: str, db: Session = Depends(get_db)):
     """Get all Bandhan Plus quotes for an instance"""
     controller = CustomerController(db)
     return controller.get_bandhan_plus_quotes_by_instance(instance_id)
 
 
 @router.get("/instance/{instance_id}/pulse-quotations", response_model=List[PulseQuotation])
-async def get_pulse_quotations_by_instance(instance_id: str, db: Session = Depends(get_db)):
+def get_pulse_quotations_by_instance(instance_id: str, db: Session = Depends(get_db)):
     """Get all Pulse quotations for an instance"""
     controller = CustomerController(db)
     return controller.get_pulse_quotations_by_instance(instance_id)
 
 
 @router.get("/instance/{instance_id}/regular-bandhan", response_model=List[RegularBandhan])
-async def get_regular_bandhan_by_instance(instance_id: str, db: Session = Depends(get_db)):
+def get_regular_bandhan_by_instance(instance_id: str, db: Session = Depends(get_db)):
     """Get all Regular Bandhan records for an instance"""
     controller = CustomerController(db)
     return controller.get_regular_bandhan_by_instance(instance_id)
 
 
 @router.get("/instance/{instance_id}/lms-data", response_model=List[LMSData])
-async def get_lms_data_by_instance(instance_id: str, db: Session = Depends(get_db)):
+def get_lms_data_by_instance(instance_id: str, db: Session = Depends(get_db)):
     """Get all LMS data for an instance"""
     controller = CustomerController(db)
     return controller.get_lms_data_by_instance(instance_id)
 
 
 @router.get("/instance/{instance_id}/open-sr-load-reports", response_model=List[OpenSRLoadReport])
-async def get_open_sr_load_reports_by_instance(
+def get_open_sr_load_reports_by_instance(
     instance_id: str,
     include_closed: bool = Query(False, description="Also return Open SRs that are already closed in the MaxTTR file"),
     db: Session = Depends(get_db)
@@ -1789,7 +1789,7 @@ async def get_open_sr_load_reports_by_instance(
 
 
 @router.get("/export/selected")
-async def export_selected_records(
+def export_selected_records(
     ids: str = Query(..., description="Comma-separated list of record IDs"),
     user_id: str = Header(..., alias="user-id"),
     db: Session = Depends(get_db)
@@ -1843,31 +1843,13 @@ async def export_selected_records(
 
 # Add this new endpoint to get counts for all tables
 @router.get("/counts/all")
-async def get_all_table_counts(
+def get_all_table_counts(
     db: Session = Depends(get_db)
 ):
-    """Get total counts for all tables"""
+    """Get total counts for all tables.
+
+    One UNION ALL query instead of 18 sequential COUNT(*) calls - the
+    same numbers in one network round trip instead of eighteen.
+    """
     controller = CustomerController(db)
-    
-    counts = {
-        "customers": controller.get_customers_count(),
-        "amc_agreements": controller.get_amc_agreements_count(),
-        "asset_detailed": controller.get_asset_detailed_count(),
-        "asset_services": controller.get_asset_services_count(),
-        "anubandhan_plus": controller.get_anubandhan_plus_quotes_count(),
-        "anubandhan": controller.get_anubandhan_quotes_count(),
-        "bandhan_plus": controller.get_bandhan_plus_quotes_count(),
-        "pulse": controller.get_pulse_quotations_count(),
-        "regular_bandhan": controller.get_regular_bandhan_count(),
-        "lms_data": controller.get_lms_data_count(),
-        "open_sr_load_reports": controller.get_open_sr_load_reports_count(),
-        "open_sr_data": controller.get_open_sr_data_count(),
-        "response_time_maxttr": controller.get_response_time_maxttr_count(),
-        "cdi_detail_report": controller.get_cdi_detail_report_count(),
-        "efsr_report": controller.get_efsr_report_count(),
-        "amc_expiry_planner": controller.get_amc_expiry_planner_count(),
-        "lms_insia": controller.get_lms_insia_count(),
-        "all_invoice_report": controller.get_all_invoice_report_count()
-    }
-    
-    return counts    
+    return controller.get_all_counts()    

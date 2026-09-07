@@ -389,10 +389,20 @@ def clear_data(db: Session):
 # ---------------- MANUAL STATUS (typed, not imported) ----------------------- #
 
 def set_manual_status(db: Session, uid_no: str, status: str, left_on=None,
-                      reason: str = None, user_id: str = None):
+                      reason: str = None, user_id: str = None,
+                      allow_unknown_uid: bool = False):
     """Type an employment status for ONE engineer. Overrides the file for good
     (until it is cleared), so an engineer who has left stays left however many
-    times a stale export is re-uploaded on top of them."""
+    times a stale export is re-uploaded on top of them.
+
+    This is the ONE writer of pms_training_status_overrides. The SE UID Master's
+    status editor calls it too, which is what keeps the two pages agreeing: they
+    do not copy a status to each other, they write and read the same row.
+
+    allow_unknown_uid is for that caller. The Training Report refuses a UID it
+    has no employee for, because there the row would be invisible and nobody
+    could undo it; on the SE UID Master the engineer IS on screen with a Clear
+    button, so the reason does not apply."""
     uid = _clean_str(uid_no, 60)
     if not uid:
         return {"success": False, "message": "No employee to set the status on"}
@@ -400,8 +410,7 @@ def set_manual_status(db: Session, uid_no: str, status: str, left_on=None,
     if wanted is None:
         return {"success": False,
                 "message": "Status must be Active or Inactive"}
-    # An unknown UID would be an invisible row nobody can see or undo.
-    if not db.query(PmsTrainingRecord.id).filter(
+    if not allow_unknown_uid and not db.query(PmsTrainingRecord.id).filter(
             PmsTrainingRecord.uid_no == uid).first():
         return {"success": False,
                 "message": f"No employee with UID {uid} in the training data"}
@@ -484,6 +493,10 @@ def _build_payload(db: Session):
             emp = employees[r.uid_no] = {
                 "uid_no": r.uid_no,
                 "employee_ticket_number": r.employee_ticket_number,
+                # HR's employee code, fetched THROUGH the SE UID master (filled
+                # below). Not in the training file at all — the file's own
+                # ticket number is a different, 12-digit KOEL identifier.
+                "e_code": "",
                 "full_name": r.full_name,
                 "occupation": r.occupation,
                 "branch_name": r.branch_name,
@@ -524,6 +537,23 @@ def _build_payload(db: Session):
             emp["_seen"].setdefault(k, set()).add(v)
         if r.skill:
             emp["skills"].append({"id": r.id, "skill": r.skill, "values": extra})
+
+    # ---- HR's employee code, borrowed from the SE UID master ----
+    # The training file has no such column. The master is where a UID NO and a
+    # name are reconciled with HR's E Code, so the lookup goes through it: UID
+    # first, letters-only name second — the same rule every join in the PMS uses.
+    try:
+        # NOTE: _tight must NOT be re-imported here — a local import would make
+        # it a local name for the WHOLE function and crash its earlier use above.
+        from app.controllers.pms_controller import se_uid_employee_codes
+        code_uid, code_name = se_uid_employee_codes(db)
+        for uid, emp in employees.items():
+            emp["e_code"] = (code_uid.get(str(uid).strip().upper())
+                             or code_name.get(_tight(emp.get("name_key")
+                                                     or emp["full_name"]))
+                             or "")
+    except Exception as e:                   # a missing master must not break
+        print(f"[training] employee codes skipped: {e}")   # the whole report
 
     # ---- the typed statuses win over the file ----
     # One query for the lot: the table holds one row per engineer HR has told us

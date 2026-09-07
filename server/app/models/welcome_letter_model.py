@@ -67,10 +67,15 @@ class WelcomeLetterMaster(Base):
 
 
 class WelcomeLetterAttachment(Base):
-    """Master attachment library (Master Setup → Default Attachments). Every
-    file here is offered on the letter preview and the sender ticks the ones
-    that go out with that particular letter. The file itself lives IN the
-    database (file_data), never on disk."""
+    """Master attachment library. Nothing here is picked by hand any more — a
+    file goes out automatically, and `kind` says on which letters:
+
+      DEFAULT — every letter gets it (Master Setup → Default Attachments)
+      MODEL   — only letters whose engine model is mapped to it in
+                welcome_letter_model_rules (Master Setup → Model-wise
+                Attachments)
+
+    The file itself lives IN the database (file_data), never on disk."""
     __tablename__ = "welcome_letter_attachments"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -79,5 +84,23 @@ class WelcomeLetterAttachment(Base):
     content_type = Column(String(150), nullable=True)
     file_size = Column(Integer, nullable=True)
     stored_path = Column(String(500), nullable=True)     # legacy disk path
+    # NULL on rows that pre-date the split — read as DEFAULT everywhere
+    kind = Column(String(20), nullable=True, index=True)
     uploaded_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=now_ist)
+
+
+class WelcomeLetterModelRule(Base):
+    """Engine model → the attachment that letter gets on top of the defaults.
+
+    One row per engine model (engine_model is UNIQUE), which is what lets the
+    Master Setup dropdown drop a model once it has been assigned. Many models
+    may point at the same attachment — that is the normal case, one maintenance
+    chart covering a whole family of engines."""
+    __tablename__ = "welcome_letter_model_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    engine_model = Column(String(200), unique=True, index=True, nullable=False)
+    attachment_id = Column(Integer, index=True, nullable=False)
+    created_by = Column(String(50), nullable=True)
     created_at = Column(DateTime, default=now_ist)

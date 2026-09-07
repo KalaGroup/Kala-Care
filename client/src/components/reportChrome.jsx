@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 /* ----------------------------------------------------------------------------
    Shared chrome for the wide PMS report tables (Employee Productivity, SR
@@ -261,22 +262,101 @@ export const HScrollBox = ({ watch, children }) => {
 // ---- single-choice dropdown (column granularity) --------------------------
 // Same shell as MultiSelect so the filter bar reads as one set of controls;
 // picking an option applies it and closes.
-export const SingleSelect = ({ label, items, value, onChange, align = 'left' }) => {
+/* ----------------------------------------------------------------------------
+   The panel every filter dropdown drops.
+
+   It is rendered into document.body through a PORTAL, pinned to the trigger's
+   screen position. Absolutely positioned inside the toolbar it was at the mercy
+   of every ancestor: the report card clips it, and the table's sticky cells
+   (which carry their own z-index) can paint over it — so a long list came out
+   cut off half way down. Out in the body there is no ancestor left to clip it
+   and nothing on the page above it.
+
+   Hover has to survive the trip: the panel is no longer a DOM child of the
+   trigger, so the pointer moving from one to the other fires mouseleave on the
+   trigger. Both ends therefore share one CLOSE TIMER — leaving either starts it,
+   entering either cancels it — which also gives the pointer time to cross the
+   4px gap between them.
+---------------------------------------------------------------------------- */
+const HOVER_CLOSE_MS = 160;
+
+const AnchoredPanel = ({ open, anchorRef, align, width, onLeave, onEnter, children }) => {
+  const [pos, setPos] = useState(null);
+
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return undefined; }
+    const place = () => {
+      const r = anchorRef.current?.getBoundingClientRect();
+      if (!r) return;
+      // Keep it on screen: a right-aligned panel measures from the right edge,
+      // and either one is nudged back inside if the window is too narrow.
+      const gap = 4;
+      const next = { top: Math.round(r.bottom + gap) };
+      if (align === 'right') {
+        next.right = Math.round(Math.max(4, window.innerWidth - r.right));
+      } else {
+        next.left = Math.round(Math.min(Math.max(4, r.left),
+          Math.max(4, window.innerWidth - width - 4)));
+      }
+      setPos(next);
+    };
+    place();
+    // `true` = capture, so a scroll inside ANY container re-pins the panel.
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, align, width, anchorRef]);
+
+  if (!open || !pos) return null;
+  return createPortal(
+    <div
+      data-pms-dropdown=""
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, right: pos.right,
+        width, zIndex: 1000 }}>
+      {children}
+    </div>,
+    document.body,
+  );
+};
+
+/* Open/close shared by both selects: click toggles, hover opens, and the close
+   is always delayed so the pointer can cross into the panel. */
+const useDropdown = () => {
   const [open, setOpen] = useState(false);
-  const box = useRef(null);
+  const anchor = useRef(null);
+  const timer = useRef(null);
+
+  const cancel = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+  const enter = () => { cancel(); setOpen(true); };
+  const leave = () => { cancel(); timer.current = setTimeout(() => setOpen(false), HOVER_CLOSE_MS); };
+  useEffect(() => cancel, []);
 
   useEffect(() => {
     if (!open) return undefined;
-    const away = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    // The panel lives outside `anchor`, so a click inside it must not count as
+    // a click away — it is found by its marker attribute instead.
+    const away = (e) => {
+      if (anchor.current && anchor.current.contains(e.target)) return;
+      if (e.target.closest && e.target.closest('[data-pms-dropdown]')) return;
+      setOpen(false);
+    };
     document.addEventListener('mousedown', away);
     return () => document.removeEventListener('mousedown', away);
   }, [open]);
 
+  return { open, setOpen, anchor, enter, leave, cancel };
+};
+
+export const SingleSelect = ({ label, items, value, onChange, align = 'left' }) => {
+  const { open, setOpen, anchor, enter, leave } = useDropdown();
   const cur = items.find((i) => i.v === value) || items[0] || { t: '' };
   return (
-    <div className="relative" ref={box}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}>
+    <div className="relative" ref={anchor} onMouseEnter={enter} onMouseLeave={leave}>
       <button type="button" onClick={() => setOpen(!open)}
         className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
           open ? 'border-[#2f3192] text-[#2f3192] bg-[#2f3192]/5'
@@ -284,22 +364,20 @@ export const SingleSelect = ({ label, items, value, onChange, align = 'left' }) 
         {label}: <span className="font-semibold">{cur.t}</span>
         <span className={`text-[8px] transition-transform ${open ? 'rotate-180' : ''}`}>▼</span>
       </button>
-      {open && (
-        /* pt-1 is PADDING — it keeps the hover unbroken across the gap */
-        <div className={`absolute z-40 top-full pt-1 ${align === 'right' ? 'right-0' : 'left-0'}`}>
-          <div className="w-36 bg-white border border-gray-200 rounded-xl shadow-xl p-1">
-            {items.map((it) => (
-              <button key={it.v} type="button"
-                onClick={() => { onChange(it.v); setOpen(false); }}
-                className={`block w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${
-                  it.v === cur.v ? 'font-semibold text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                style={it.v === cur.v ? { backgroundColor: THEME } : {}}>
-                {it.t}
-              </button>
-            ))}
-          </div>
+      <AnchoredPanel open={open} anchorRef={anchor} align={align} width={144}
+        onEnter={enter} onLeave={leave}>
+        <div className="bg-white border border-gray-200 rounded-xl shadow-xl p-1">
+          {items.map((it) => (
+            <button key={it.v} type="button"
+              onClick={() => { onChange(it.v); setOpen(false); }}
+              className={`block w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${
+                it.v === cur.v ? 'font-semibold text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+              style={it.v === cur.v ? { backgroundColor: THEME } : {}}>
+              {it.t}
+            </button>
+          ))}
         </div>
-      )}
+      </AnchoredPanel>
     </div>
   );
 };
@@ -307,16 +385,8 @@ export const SingleSelect = ({ label, items, value, onChange, align = 'left' }) 
 // ---- checkbox multi-select (Weeks / Days / Branch / SE) --------------------
 // An empty selection means "all", exactly like the prototype.
 export const MultiSelect = ({ label, items, selected, onChange, searchable = true, align = 'left' }) => {
-  const [open, setOpen] = useState(false);
+  const { open, setOpen, anchor, enter, leave } = useDropdown();
   const [q, setQ] = useState('');
-  const box = useRef(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const away = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', away);
-    return () => document.removeEventListener('mousedown', away);
-  }, [open]);
 
   const shown = q.trim()
     ? items.filter((it) => `${it.t} ${it.sub || ''}`.toLowerCase().includes(q.trim().toLowerCase()))
@@ -327,12 +397,8 @@ export const MultiSelect = ({ label, items, selected, onChange, searchable = tru
     onChange(next);
   };
 
-  // Opens on hover and closes when the pointer leaves (click still toggles),
-  // the same behaviour as the page's period picker.
   return (
-    <div className="relative" ref={box}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}>
+    <div className="relative" ref={anchor} onMouseEnter={enter} onMouseLeave={leave}>
       <button type="button" onClick={() => setOpen(!open)}
         className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
           open || selected.size
@@ -341,11 +407,9 @@ export const MultiSelect = ({ label, items, selected, onChange, searchable = tru
         {label}: <span className="font-semibold">{selected.size || 'All'}</span>
         <span className={`text-[8px] transition-transform ${open ? 'rotate-180' : ''}`}>▼</span>
       </button>
-      {open && (
-        /* pt-1 is PADDING, not a margin — it keeps the hover unbroken across
-           the gap between the button and the panel. */
-        <div className={`absolute z-40 top-full pt-1 ${align === 'right' ? 'right-0' : 'left-0'}`}>
-        <div className="w-64 bg-white border border-gray-200 rounded-xl shadow-xl p-2">
+      <AnchoredPanel open={open} anchorRef={anchor} align={align} width={256}
+        onEnter={enter} onLeave={leave}>
+        <div className="bg-white border border-gray-200 rounded-xl shadow-xl p-2">
           <div className="flex items-center gap-1.5 pb-2 mb-1 border-b border-gray-100">
             {searchable && (
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search"
@@ -361,7 +425,9 @@ export const MultiSelect = ({ label, items, selected, onChange, searchable = tru
               Clear
             </button>
           </div>
-          <div className="max-h-64 overflow-y-auto">
+          {/* Tall enough to be worth opening, but never past the window bottom —
+              the list scrolls inside the panel instead of running off screen. */}
+          <div className="overflow-y-auto" style={{ maxHeight: 'min(60vh, 22rem)' }}>
             {shown.length === 0 && <div className="px-1.5 py-2 text-[11px] text-gray-500">No match</div>}
             {shown.map((it) => (
               <label key={it.v} className="flex items-center gap-2 px-1.5 py-1 rounded-md text-xs cursor-pointer hover:bg-gray-50">
@@ -373,8 +439,7 @@ export const MultiSelect = ({ label, items, selected, onChange, searchable = tru
             ))}
           </div>
         </div>
-        </div>
-      )}
+      </AnchoredPanel>
     </div>
   );
 };

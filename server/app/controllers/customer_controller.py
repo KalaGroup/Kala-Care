@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, desc, and_, func, exists, case
+from sqlalchemy import or_, desc, and_, func, exists, case, select, literal, union_all
 from fastapi import HTTPException
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -31,6 +31,46 @@ class CustomerController:
     def __init__(self, db: Session):
         self.db = db
     
+    # Every unfiltered table count in ONE round trip.
+    #
+    # The 18 individual *_count() methods below each issue their own
+    # COUNT(*), which is fine for a single table but means 18 sequential
+    # network round trips when the dashboard asks for all of them. Against
+    # the remote SQL Server (~60 ms RTT) that was ~4 s of pure latency.
+    # UNION ALL returns the identical numbers in a single trip.
+    _COUNT_MODELS = {
+        "customers": Customer,
+        "amc_agreements": AMCAgreement,
+        "asset_detailed": AssetDetailed,
+        "asset_services": AssetService,
+        "anubandhan_plus": AnubandhanPlusQuote,
+        "anubandhan": AnubandhanQuote,
+        "bandhan_plus": BandhanPlusQuote,
+        "pulse": PulseQuotation,
+        "regular_bandhan": RegularBandhan,
+        "lms_data": LMSData,
+        "open_sr_load_reports": OpenSRLoadReport,
+        "open_sr_data": MaxTTROilChangeSRZeroLabourFlag,
+        "response_time_maxttr": ResponseTimeMaxTTR,
+        "cdi_detail_report": CDIDetailReport,
+        "efsr_report": EFSRReport,
+        "amc_expiry_planner": AMCExpiryPlanner,
+        "lms_insia": LMSInsia,
+        "all_invoice_report": AllInvoiceReport,
+    }
+
+    def get_all_counts(self) -> Dict[str, int]:
+        """Unfiltered row count for every customer-data table, in one query."""
+        stmts = [
+            select(literal(key).label("k"), func.count().label("n"))
+            .select_from(model.__table__)
+            for key, model in self._COUNT_MODELS.items()
+        ]
+        rows = self.db.execute(union_all(*stmts)).all()
+        counts = {row.k: int(row.n) for row in rows}
+        # Never let a missing key break the dashboard.
+        return {key: counts.get(key, 0) for key in self._COUNT_MODELS}
+
     # Add these count methods to your CustomerController class
 # ==================== COUNT METHODS FOR PAGINATION ====================
 

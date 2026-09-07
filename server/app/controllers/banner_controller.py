@@ -24,8 +24,18 @@ async def read_banner_image(file: UploadFile) -> tuple[bytes, str]:
         await file.close()
 
 def get_all_banners(db: Session):
-    """Get all banners ordered by position"""
-    return db.query(Banner).order_by(Banner.position).all()
+    """Banner metadata ordered by position - WITHOUT the image bytes.
+
+    The listing endpoint only returns ids, positions and timestamps; it links
+    to /banners/{position}/image for the picture itself. Selecting the whole
+    row dragged every banner's VARBINARY(MAX) across the wire (~1.5 MB here)
+    just to discard it, which cost 8-12 s per call on the remote database.
+    """
+    return (
+        db.query(Banner.id, Banner.position, Banner.created_at, Banner.updated_at)
+        .order_by(Banner.position)
+        .all()
+    )
 
 def get_banner_by_position(db: Session, position: int):
     """Get banner by position"""

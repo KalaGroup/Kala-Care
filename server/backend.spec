@@ -1,7 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('app', 'app'), ('.env', '.')]
+# 'assets' carries the Welcome Letter letterhead bands. Without it the frozen
+# EXE looks for them next to a client/ folder that does not exist beside a
+# PyInstaller temp dir, and every welcome letter goes out with no logo.
+datas = [('app', 'app'), ('.env', '.'), ('assets', 'assets')]
 binaries = []
 hiddenimports = ['email', 'email.mime', 'email.mime.text', 'email.mime.multipart', 'email.mime.base', 'email.mime.application', 'email.mime.image', 'smtplib']
 tmp_ret = collect_all('fastapi')
